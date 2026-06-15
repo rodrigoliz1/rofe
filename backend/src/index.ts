@@ -107,8 +107,11 @@ app.post('/api/orders', async (req, res) => {
     }
 
     // --- Card Payment (Mercado Pago Point) ---
-    const accessToken = process.env.MERCADO_PAGO_ACCESS_TOKEN;
-    const deviceId = process.env.POINT_DEVICE_ID;
+    // Forzamos a leer como string y quitamos comillas accidentales
+    const accessToken = String(process.env.MERCADO_PAGO_ACCESS_TOKEN || '').replace(/['"]/g, '').trim();
+    const deviceId = String(process.env.POINT_DEVICE_ID || '').replace(/['"]/g, '').trim();
+
+    console.log(`[DEBUG MP] Intentando leer Token: ${accessToken ? 'Existe (oculto)' : 'FALTA'} | Device: ${deviceId}`);
 
     // Check configuration
     if (!accessToken || !deviceId || accessToken.includes('tu_access_token')) {
