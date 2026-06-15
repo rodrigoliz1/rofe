@@ -66,7 +66,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [adjustedRegister, setAdjustedRegister] = useState<Record<string, number>>({});
   const [dbInventory, setDbInventory] = useState<InventoryDbItem[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [, setOrders] = useState<Order[]>([]);
   const [bakeryBatches, setBakeryBatches] = useState<any[]>([]);
 
   // Form for manual transactions
