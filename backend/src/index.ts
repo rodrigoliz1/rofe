@@ -274,7 +274,7 @@ app.post('/api/webhooks/mercadopago', async (req, res) => {
 
     if (type === 'payment' && data && data.id) {
       const paymentId = data.id;
-      const accessToken = process.env.MERCADO_PAGO_ACCESS_TOKEN;
+      const accessToken = String(process.env.MERCADO_PAGO_ACCESS_TOKEN || '').replace(/['"]/g, '').trim();
 
       const mpResponse = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
         headers: {
