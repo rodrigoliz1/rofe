@@ -139,7 +139,7 @@ app.post('/api/orders', async (req, res) => {
         'x-idempotency-key': `order-${orderId}-${Date.now()}`
       },
       body: JSON.stringify({
-        amount: total,
+        amount: Math.round(total * 100), // Envia 4500 centavos en vez de 45 pesos
         additional_info: {
           external_reference: orderId,
           print_on_terminal: true
