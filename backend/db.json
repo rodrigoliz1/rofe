@@ -1,0 +1,417 @@
+{
+  "inventory": [
+    {
+      "product_id": "espresso",
+      "stock": 50,
+      "cost": 8
+    },
+    {
+      "product_id": "double-espresso",
+      "stock": 50,
+      "cost": 12
+    },
+    {
+      "product_id": "americano",
+      "stock": 49,
+      "cost": 6
+    },
+    {
+      "product_id": "latte",
+      "stock": 45,
+      "cost": 14
+    },
+    {
+      "product_id": "flat-white",
+      "stock": 50,
+      "cost": 16
+    },
+    {
+      "product_id": "matcha-latte",
+      "stock": 30,
+      "cost": 20
+    },
+    {
+      "product_id": "cold-brew",
+      "stock": 40,
+      "cost": 10
+    },
+    {
+      "product_id": "iced-latte",
+      "stock": 40,
+      "cost": 14
+    },
+    {
+      "product_id": "iced-matcha-latte",
+      "stock": 30,
+      "cost": 20
+    },
+    {
+      "product_id": "croissant-mantequilla",
+      "stock": 15,
+      "cost": 15
+    },
+    {
+      "product_id": "pain-au-chocolat",
+      "stock": 15,
+      "cost": 18
+    },
+    {
+      "product_id": "galleta-chocolate",
+      "stock": 17,
+      "cost": 8
+    }
+  ],
+  "cashRegister": {
+    "bill_1000": 3,
+    "bill_500": 0,
+    "bill_200": 8,
+    "bill_100": 7,
+    "bill_50": 10,
+    "bill_20": 8,
+    "coin_20": 0,
+    "coin_10": 4,
+    "coin_5": 9,
+    "coin_2": 10,
+    "coin_1": 10,
+    "coin_0_50": 10,
+    "coin_0_20": 5
+  },
+  "transactions": [
+    {
+      "type": "adjustment",
+      "amount": 5906,
+      "description": "Ajuste manual del administrador",
+      "denominations": {
+        "bill_1000": 3,
+        "bill_500": 0,
+        "bill_200": 7,
+        "bill_100": 6,
+        "bill_50": 11,
+        "bill_20": 11,
+        "coin_20": 0,
+        "coin_10": 5,
+        "coin_5": 10,
+        "coin_2": 10,
+        "coin_1": 10,
+        "coin_0_50": 10,
+        "coin_0_20": 5
+      },
+      "created_at": "2026-06-15T06:17:34.939Z"
+    },
+    {
+      "type": "payment",
+      "amount": 100,
+      "description": "Pago en efectivo recibido para orden #062",
+      "denominations": {
+        "bill_100": 1
+      },
+      "id": 2,
+      "created_at": "2026-06-15T06:19:16.524Z"
+    },
+    {
+      "type": "change",
+      "amount": 45,
+      "description": "Cambio devuelto para orden #062",
+      "denominations": {
+        "bill_20": 2,
+        "coin_5": 1
+      },
+      "id": 3,
+      "created_at": "2026-06-15T06:19:16.525Z"
+    },
+    {
+      "type": "payment",
+      "amount": 200,
+      "description": "Pago en efectivo recibido para orden #049",
+      "denominations": {
+        "bill_200": 1
+      },
+      "id": 4,
+      "created_at": "2026-06-15T06:21:32.324Z"
+    },
+    {
+      "type": "change",
+      "amount": 80,
+      "description": "Cambio devuelto para orden #049",
+      "denominations": {
+        "bill_50": 1,
+        "bill_20": 1,
+        "coin_10": 1
+      },
+      "id": 5,
+      "created_at": "2026-06-15T06:21:32.325Z"
+    }
+  ],
+  "orders": [
+    {
+      "id": "#054",
+      "customerName": "Rodrigo",
+      "items": [
+        {
+          "id": "latte-eyJzaXpl",
+          "product": {
+            "id": "latte",
+            "name": "Latte",
+            "description": "Espresso con leche cremada al vapor y una fina capa de espuma.",
+            "price": 55,
+            "category": "coffee",
+            "icon": "latte",
+            "customizable": true,
+            "image": "https://images.unsplash.com/photo-1541167760496-1628856ab772?auto=format&fit=crop&q=80&w=600",
+            "stock": 50,
+            "cost": 14
+          },
+          "quantity": 1,
+          "customization": {
+            "size": "regular",
+            "milk": "whole",
+            "sweetness": "none",
+            "temp": "hot",
+            "extraShot": false
+          },
+          "totalPrice": 55
+        }
+      ],
+      "total": 55,
+      "status": "completed",
+      "paymentMethod": "card",
+      "createdAt": "2026-06-15T06:18:17.090Z",
+      "paymentId": "sim-payment-1781504298343"
+    },
+    {
+      "id": "#062",
+      "customerName": "Rodrigo",
+      "items": [
+        {
+          "id": "latte-eyJzaXpl",
+          "product": {
+            "id": "latte",
+            "name": "Latte",
+            "description": "Espresso con leche cremada al vapor y una fina capa de espuma.",
+            "price": 55,
+            "category": "coffee",
+            "icon": "latte",
+            "customizable": true,
+            "image": "https://images.unsplash.com/photo-1541167760496-1628856ab772?auto=format&fit=crop&q=80&w=600",
+            "stock": 49,
+            "cost": 14
+          },
+          "quantity": 1,
+          "customization": {
+            "size": "regular",
+            "milk": "whole",
+            "sweetness": "none",
+            "temp": "hot",
+            "extraShot": false
+          },
+          "totalPrice": 55
+        }
+      ],
+      "total": 55,
+      "status": "completed",
+      "paymentMethod": "cash",
+      "createdAt": "2026-06-15T06:18:44.696Z",
+      "paymentId": "cash-payment-1781504356521"
+    },
+    {
+      "id": "#033",
+      "customerName": "Rodrigo",
+      "items": [
+        {
+          "id": "latte-eyJzaXpl",
+          "product": {
+            "id": "latte",
+            "name": "Latte",
+            "description": "Espresso con leche cremada al vapor y una fina capa de espuma.",
+            "price": 55,
+            "category": "coffee",
+            "icon": "latte",
+            "customizable": true,
+            "image": "https://images.unsplash.com/photo-1541167760496-1628856ab772?auto=format&fit=crop&q=80&w=600",
+            "stock": 48,
+            "cost": 14
+          },
+          "quantity": 1,
+          "customization": {
+            "size": "regular",
+            "milk": "whole",
+            "sweetness": "none",
+            "temp": "hot",
+            "extraShot": false
+          },
+          "totalPrice": 55
+        },
+        {
+          "id": "galleta-chocolate-eyJzaXpl",
+          "product": {
+            "id": "galleta-chocolate",
+            "name": "Galleta de Chispas de Chocolate",
+            "description": "Galleta horneada de chispas de chocolate.",
+            "price": 25,
+            "category": "bakery",
+            "icon": "pain_choc",
+            "customizable": true,
+            "image": "galleta-chispas.jpeg",
+            "stock": 20,
+            "cost": 8
+          },
+          "quantity": 1,
+          "customization": {
+            "size": "regular",
+            "milk": "none",
+            "sweetness": "none",
+            "temp": "hot",
+            "extraShot": false
+          },
+          "totalPrice": 25
+        }
+      ],
+      "total": 80,
+      "status": "pending_payment",
+      "paymentMethod": "card",
+      "createdAt": "2026-06-15T06:20:07.155Z"
+    },
+    {
+      "id": "#088",
+      "customerName": "Rodrigo",
+      "items": [
+        {
+          "id": "latte-eyJzaXpl",
+          "product": {
+            "id": "latte",
+            "name": "Latte",
+            "description": "Espresso con leche cremada al vapor y una fina capa de espuma.",
+            "price": 55,
+            "category": "coffee",
+            "icon": "latte",
+            "customizable": true,
+            "image": "https://images.unsplash.com/photo-1541167760496-1628856ab772?auto=format&fit=crop&q=80&w=600",
+            "stock": 48,
+            "cost": 14
+          },
+          "quantity": 1,
+          "customization": {
+            "size": "regular",
+            "milk": "whole",
+            "sweetness": "none",
+            "temp": "hot",
+            "extraShot": false
+          },
+          "totalPrice": 55
+        },
+        {
+          "id": "galleta-chocolate-eyJzaXpl",
+          "product": {
+            "id": "galleta-chocolate",
+            "name": "Galleta de Chispas de Chocolate",
+            "description": "Galleta horneada de chispas de chocolate.",
+            "price": 25,
+            "category": "bakery",
+            "icon": "pain_choc",
+            "customizable": true,
+            "image": "galleta-chispas.jpeg",
+            "stock": 20,
+            "cost": 8
+          },
+          "quantity": 1,
+          "customization": {
+            "size": "regular",
+            "milk": "none",
+            "sweetness": "none",
+            "temp": "hot",
+            "extraShot": false
+          },
+          "totalPrice": 25
+        }
+      ],
+      "total": 80,
+      "status": "completed",
+      "paymentMethod": "card",
+      "createdAt": "2026-06-15T06:20:13.077Z",
+      "paymentId": "sim-payment-1781504416808"
+    },
+    {
+      "id": "#049",
+      "customerName": "Re",
+      "items": [
+        {
+          "id": "americano-eyJzaXpl",
+          "product": {
+            "id": "americano",
+            "name": "Americano",
+            "description": "Espresso diluido en agua caliente. Limpio y balanceado.",
+            "price": 40,
+            "category": "coffee",
+            "icon": "americano",
+            "customizable": true,
+            "image": "americano.webp",
+            "stock": 50,
+            "cost": 6
+          },
+          "quantity": 1,
+          "customization": {
+            "size": "regular",
+            "milk": "none",
+            "sweetness": "none",
+            "temp": "hot",
+            "extraShot": false
+          },
+          "totalPrice": 40
+        },
+        {
+          "id": "latte-eyJzaXpl",
+          "product": {
+            "id": "latte",
+            "name": "Latte",
+            "description": "Espresso con leche cremada al vapor y una fina capa de espuma.",
+            "price": 55,
+            "category": "coffee",
+            "icon": "latte",
+            "customizable": true,
+            "image": "https://images.unsplash.com/photo-1541167760496-1628856ab772?auto=format&fit=crop&q=80&w=600",
+            "stock": 46,
+            "cost": 14
+          },
+          "quantity": 1,
+          "customization": {
+            "size": "regular",
+            "milk": "whole",
+            "sweetness": "none",
+            "temp": "hot",
+            "extraShot": false
+          },
+          "totalPrice": 55
+        },
+        {
+          "id": "galleta-chocolate-eyJzaXpl",
+          "product": {
+            "id": "galleta-chocolate",
+            "name": "Galleta de Chispas de Chocolate",
+            "description": "Galleta horneada de chispas de chocolate.",
+            "price": 25,
+            "category": "bakery",
+            "icon": "pain_choc",
+            "customizable": true,
+            "image": "galleta-chispas.jpeg",
+            "stock": 18,
+            "cost": 8
+          },
+          "quantity": 1,
+          "customization": {
+            "size": "regular",
+            "milk": "none",
+            "sweetness": "none",
+            "temp": "hot",
+            "extraShot": false
+          },
+          "totalPrice": 25
+        }
+      ],
+      "total": 120,
+      "status": "completed",
+      "paymentMethod": "cash",
+      "createdAt": "2026-06-15T06:20:55.904Z",
+      "paymentId": "cash-payment-1781504492321"
+    }
+  ]
+}
