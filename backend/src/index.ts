@@ -269,41 +269,20 @@ app.post('/api/orders/:id/cash-payment', async (req, res) => {
 // Webhook endpoint for Mercado Pago Point (Cards)
 app.post('/api/webhooks/mercadopago', async (req, res) => {
   try {
-    // 1. Imprimir TODO para ver cómo viene el sobre de Mercado Pago
-    console.log('--- NUEVO WEBHOOK DE MERCADO PAGO ---');
-    console.log('QUERY:', req.query);
-    console.log('BODY:', req.body);
-
-    // 2. Extraer el ID y el tipo, buscando tanto en el Body como en el Query (URL)
     const type = req.body?.type || req.query?.topic || req.query?.type;
-    const paymentId = req.body?.data?.id || req.query?.id || req.query?.['data.id'];
-    const action = req.body?.action || req.query?.action;
 
-    console.log(`Interpretado -> Tipo: ${type}, Payment ID: ${paymentId}, Action: ${action}`);
+    console.log(`Webhook recibido -> Tipo: ${type}`);
 
-    // 3. Si es un pago y tiene ID, confirmamos con Mercado Pago
-    if (type === 'payment' && paymentId) {
-      const accessToken = String(process.env.MERCADO_PAGO_ACCESS_TOKEN || '').replace(/['"]/g, '').trim();
+    // --- ESCENARIO 1: Pago desde Terminal Point Smart ---
+    if (type === 'point_integration_wh') {
+      const pointState = req.body?.state; // 'FINISHED'
+      const paymentState = req.body?.payment?.state; // 'approved'
+      const orderId = req.body?.additional_info?.external_reference; // '#096'
+      const paymentId = req.body?.payment?.id; // 164264977366
 
-      const mpResponse = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`
-        }
-      });
-
-      if (!mpResponse.ok) {
-        console.error(`Error al consultar detalles de pago para id ${paymentId}`);
-        res.sendStatus(502);
-        return;
-      }
-
-      const paymentDetails: any = await mpResponse.json();
-      const status = paymentDetails.status;
-      const orderId = paymentDetails.external_reference;
-
-      console.log(`Pago ${paymentId} tiene estado: ${status} para pedido: ${orderId}`);
-
-      if (status === 'approved' && orderId) {
+      if (pointState === 'FINISHED' && paymentState === 'approved' && orderId) {
+        console.log(`Pago físico aprobado para pedido: ${orderId}`);
+        
         const orders = await db.getOrders();
         const orderIndex = orders.findIndex((o) => o.id === orderId);
         
@@ -314,7 +293,7 @@ app.post('/api/webhooks/mercadopago', async (req, res) => {
 
           console.log(`✅ Pedido ${orderId} marcado como PAGADO.`);
 
-          // ¡Disparar evento al iPad para que cierre la ventana negra!
+          // Disparar evento a la web para cerrar el modal
           broadcast({
             type: 'order_paid',
             orderId: orderId,
@@ -322,10 +301,40 @@ app.post('/api/webhooks/mercadopago', async (req, res) => {
           });
         }
       }
-    } else {
-      console.log('Ignorando evento (No es un pago de tarjeta final).');
+    } 
+    // --- ESCENARIO 2: Pago tradicional / Fallback ---
+    else if (type === 'payment') {
+      const paymentId = req.body?.data?.id || req.query?.id || req.query?.['data.id'];
+      if (paymentId) {
+        const accessToken = String(process.env.MERCADO_PAGO_ACCESS_TOKEN || '').replace(/['"]/g, '').trim();
+
+        const mpResponse = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+
+        if (mpResponse.ok) {
+          const paymentDetails: any = await mpResponse.json();
+          const status = paymentDetails.status;
+          const orderId = paymentDetails.external_reference;
+
+          if (status === 'approved' && orderId) {
+            const orders = await db.getOrders();
+            const orderIndex = orders.findIndex((o) => o.id === orderId);
+            
+            if (orderIndex > -1 && orders[orderIndex].status !== 'paid') {
+              await db.updateOrderStatus(orderId, 'paid', paymentId);
+              const updatedOrders = await db.getOrders();
+              const paidOrder = updatedOrders.find(o => o.id === orderId);
+
+              console.log(`✅ Pedido ${orderId} marcado como PAGADO (Fallback).`);
+              broadcast({ type: 'order_paid', orderId: orderId, order: paidOrder });
+            }
+          }
+        }
+      }
     }
 
+    // Siempre responder OK (200) para que Mercado Pago no reintente
     res.status(200).send('OK');
   } catch (error) {
     console.error('Error al procesar webhook:', error);
