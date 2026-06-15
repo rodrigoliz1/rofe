@@ -12,6 +12,7 @@ app.use(cors({
   origin: '*' // Allow all origins for easier PWA access on local network
 }));
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // --- Server-Sent Events (SSE) Client List ---
 let clients: express.Response[] = [];
@@ -268,12 +269,20 @@ app.post('/api/orders/:id/cash-payment', async (req, res) => {
 // Webhook endpoint for Mercado Pago Point (Cards)
 app.post('/api/webhooks/mercadopago', async (req, res) => {
   try {
-    const { action, data, type } = req.body;
+    // 1. Imprimir TODO para ver cómo viene el sobre de Mercado Pago
+    console.log('--- NUEVO WEBHOOK DE MERCADO PAGO ---');
+    console.log('QUERY:', req.query);
+    console.log('BODY:', req.body);
 
-    console.log(`Webhook recibido de Mercado Pago: action=${action}, type=${type}, resource_id=${data?.id}`);
+    // 2. Extraer el ID y el tipo, buscando tanto en el Body como en el Query (URL)
+    const type = req.body?.type || req.query?.topic || req.query?.type;
+    const paymentId = req.body?.data?.id || req.query?.id || req.query?.['data.id'];
+    const action = req.body?.action || req.query?.action;
 
-    if (type === 'payment' && data && data.id) {
-      const paymentId = data.id;
+    console.log(`Interpretado -> Tipo: ${type}, Payment ID: ${paymentId}, Action: ${action}`);
+
+    // 3. Si es un pago y tiene ID, confirmamos con Mercado Pago
+    if (type === 'payment' && paymentId) {
       const accessToken = String(process.env.MERCADO_PAGO_ACCESS_TOKEN || '').replace(/['"]/g, '').trim();
 
       const mpResponse = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
@@ -303,9 +312,9 @@ app.post('/api/webhooks/mercadopago', async (req, res) => {
           const updatedOrders = await db.getOrders();
           const paidOrder = updatedOrders.find(o => o.id === orderId);
 
-          console.log(`Pedido ${orderId} marcado como PAGADO.`);
+          console.log(`✅ Pedido ${orderId} marcado como PAGADO.`);
 
-          // Broadcast payment success to clients
+          // ¡Disparar evento al iPad para que cierre la ventana negra!
           broadcast({
             type: 'order_paid',
             orderId: orderId,
@@ -313,6 +322,8 @@ app.post('/api/webhooks/mercadopago', async (req, res) => {
           });
         }
       }
+    } else {
+      console.log('Ignorando evento (No es un pago de tarjeta final).');
     }
 
     res.status(200).send('OK');
