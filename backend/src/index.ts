@@ -301,6 +301,14 @@ app.post('/api/webhooks/mercadopago', async (req, res) => {
           });
         }
       }
+      else if (pointState === 'CANCELED' || pointState === 'ERROR' || paymentState === 'rejected') {
+        console.log(`⚠️ Pago físico rechazado/cancelado para pedido: ${orderId}`);
+        // Disparamos un evento de rechazo a la web
+        broadcast({
+          type: 'payment_rejected',
+          orderId: orderId
+        });
+      }
     } 
     // --- ESCENARIO 2: Pago tradicional / Fallback ---
     else if (type === 'payment') {
