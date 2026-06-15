@@ -140,7 +140,6 @@ app.post('/api/orders', async (req, res) => {
       },
       body: JSON.stringify({
         amount: total,
-        description: `Pedido ${orderId} - ${customerName}`,
         additional_info: {
           external_reference: orderId,
           print_on_terminal: true
