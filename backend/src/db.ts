@@ -2,6 +2,26 @@ import type { Client } from 'pg';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
+export interface DbRawInventory {
+  id: string; // e.g., 'coffee_beans', 'milk_whole'
+  name: string;
+  unit: string; // e.g., 'g', 'ml', 'un'
+  stock: number;
+  cost: number; // cost per unit or total cost. Let's say cost is total cost for current stock to calculate unit cost: cost / stock.
+}
+
+export interface DbProduct {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  category: 'coffee' | 'cold' | 'bakery';
+  icon: string;
+  customizable: boolean;
+  image: string;
+  recipe?: Record<string, number>; // e.g., { "coffee_beans": 25, "milk_whole": 280 }
+}
+
 // Define DB structures
 export interface DbInventoryItem {
   product_id: string;
@@ -58,6 +78,11 @@ export interface DbAdapter {
   clearOrders(): Promise<void>;
   getInventory(): Promise<DbInventoryItem[]>;
   updateInventory(productId: string, stock: number, cost: number): Promise<void>;
+  
+  getRawInventory(): Promise<DbRawInventory[]>;
+  updateRawInventory(id: string, stock: number, cost: number): Promise<void>;
+  getProducts(): Promise<DbProduct[]>;
+  updateProductPrice(id: string, price: number): Promise<void>;
   getCashRegister(): Promise<Record<string, number>>;
   adjustCashRegister(denominations: Record<string, number>): Promise<void>;
   addCashTransaction(transaction: DbCashTransaction): Promise<void>;
@@ -203,6 +228,15 @@ class JsonDbAdapter implements DbAdapter {
     }
     await this.save();
   }
+
+  async getRawInventory(): Promise<import('./db').DbRawInventory[]> {
+    return [];
+  }
+  async updateRawInventory(id: string, stock: number, cost: number): Promise<void> {}
+  async getProducts(): Promise<import('./db').DbProduct[]> {
+    return [];
+  }
+  async updateProductPrice(id: string, price: number): Promise<void> {}
 
   async getCashRegister(): Promise<Record<string, number>> {
     await this.read();
@@ -490,6 +524,15 @@ class PostgresDbAdapter implements DbAdapter {
       [productId, stock, cost]
     );
   }
+
+  async getRawInventory(): Promise<import('./db').DbRawInventory[]> {
+    return [];
+  }
+  async updateRawInventory(id: string, stock: number, cost: number): Promise<void> {}
+  async getProducts(): Promise<import('./db').DbProduct[]> {
+    return [];
+  }
+  async updateProductPrice(id: string, price: number): Promise<void> {}
 
   async getCashRegister(): Promise<Record<string, number>> {
     const res = await this.client.query('SELECT * FROM cash_register');

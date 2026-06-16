@@ -55,13 +55,82 @@ export class SupabaseDbAdapter implements DbAdapter {
 
     if (error) throw error;
 
-    // Decrement stock in database
-    for (const item of order.items) {
-      // Need to read current stock, then update.
-      // Better way is a stored procedure, but for simplicity we fetch and update.
-      const { data: inv } = await this.supabase.from('inventory').select('stock').eq('product_id', item.product.id).single();
-      if (inv) {
-        await this.supabase.from('inventory').update({ stock: Math.max(0, inv.stock - item.quantity) }).eq('product_id', item.product.id);
+    // Decrement stock in database using recipes and raw_inventory
+    const { data: products } = await this.supabase.from('products').select('*');
+    const { data: rawInv } = await this.supabase.from('raw_inventory').select('*');
+
+    if (products && rawInv) {
+      const deductions: Record<string, number> = {};
+
+      for (const item of order.items) {
+        const p = products.find((prod: any) => prod.id === item.product.id);
+        if (!p) continue;
+        
+        let recipe = p.recipe || {};
+        
+        // Handle customizations modifying the recipe
+        if (item.customization) {
+          // Base recipe modifications depending on size, etc.
+          let multiplier = item.customization.size === 'grande' ? 1.5 : 1;
+          
+          const dynamicRecipe: Record<string, number> = { ...recipe };
+          
+          if (dynamicRecipe['coffee_beans']) {
+            dynamicRecipe['coffee_beans'] *= multiplier;
+          }
+          if (dynamicRecipe['matcha_powder']) {
+            dynamicRecipe['matcha_powder'] *= multiplier;
+          }
+          
+          if (dynamicRecipe['milk_whole'] && item.customization.milk !== 'whole') {
+             const amount = dynamicRecipe['milk_whole'] * multiplier;
+             delete dynamicRecipe['milk_whole'];
+             if (item.customization.milk === 'light') dynamicRecipe['milk_light'] = amount;
+             if (item.customization.milk === 'avena') dynamicRecipe['milk_avena'] = amount;
+             if (item.customization.milk === 'almendra') dynamicRecipe['milk_almendra'] = amount;
+          } else if (dynamicRecipe['milk_whole']) {
+             dynamicRecipe['milk_whole'] *= multiplier;
+          }
+          
+          if (item.customization.extraShot) {
+             dynamicRecipe['coffee_beans'] = (dynamicRecipe['coffee_beans'] || 0) + 25; // add 25g
+          }
+          
+          // Cups
+          if (p.category === 'coffee' || p.category === 'cold') {
+             const isCold = p.category === 'cold' || item.customization.temp === 'iced';
+             const cupKey = isCold 
+                ? (item.customization.size === 'grande' ? 'cup_cold_16oz' : 'cup_cold_12oz')
+                : (item.customization.size === 'grande' ? 'cup_hot_12oz' : 'cup_hot_8oz');
+             dynamicRecipe[cupKey] = 1;
+             
+             dynamicRecipe[isCold ? 'lid_cold' : 'lid_hot'] = 1;
+             if (isCold) dynamicRecipe['straw'] = 1;
+             if (!isCold) dynamicRecipe['sleeve'] = 1;
+          }
+          
+          if (item.customization.sweetness !== 'none') {
+             dynamicRecipe['splenda'] = item.customization.sweetness === 'extra' ? 2 : 1;
+          }
+
+          // Multiply by item quantity
+          for (const [ing, qty] of Object.entries(dynamicRecipe)) {
+             deductions[ing] = (deductions[ing] || 0) + (Number(qty) * item.quantity);
+          }
+        } else {
+          // No customizations (e.g. Bakery)
+          for (const [ing, qty] of Object.entries(recipe)) {
+             deductions[ing] = (deductions[ing] || 0) + (Number(qty) * item.quantity);
+          }
+        }
+      }
+
+      // Now apply deductions to raw_inventory
+      for (const [ing, qty] of Object.entries(deductions)) {
+         const current = rawInv.find((r: any) => r.id === ing);
+         if (current) {
+            await this.supabase.from('raw_inventory').update({ stock: Math.max(0, current.stock - qty) }).eq('id', ing);
+         }
       }
     }
   }
@@ -97,6 +166,44 @@ export class SupabaseDbAdapter implements DbAdapter {
       stock,
       cost
     });
+    if (error) throw error;
+  }
+
+  async getRawInventory(): Promise<import('./db').DbRawInventory[]> {
+    const { data, error } = await this.supabase.from('raw_inventory').select('*');
+    if (error) throw error;
+    return data.map((row: any) => ({
+      id: row.id,
+      name: row.name,
+      unit: row.unit,
+      stock: Number(row.stock),
+      cost: Number(row.cost),
+    }));
+  }
+
+  async updateRawInventory(id: string, stock: number, cost: number): Promise<void> {
+    const { error } = await this.supabase.from('raw_inventory').update({ stock, cost }).eq('id', id);
+    if (error) throw error;
+  }
+
+  async getProducts(): Promise<import('./db').DbProduct[]> {
+    const { data, error } = await this.supabase.from('products').select('*');
+    if (error) throw error;
+    return data.map((row: any) => ({
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      price: Number(row.price),
+      category: row.category,
+      icon: row.icon,
+      customizable: row.customizable,
+      image: row.image,
+      recipe: row.recipe,
+    }));
+  }
+
+  async updateProductPrice(id: string, price: number): Promise<void> {
+    const { error } = await this.supabase.from('products').update({ price }).eq('id', id);
     if (error) throw error;
   }
 

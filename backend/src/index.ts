@@ -507,24 +507,26 @@ app.get('/api/admin/metrics', async (req, res) => {
       costMap[i.product_id] = i.cost;
     });
 
-    // Filter orders that are paid or completed
+    // 1. Costos de Producción (COGS) basados en órdenes vendidas
     const paidOrders = orders.filter(o => ['paid', 'preparing', 'ready', 'completed'].includes(o.status));
     
     let revenue = 0;
     let costs = 0;
+    
     paidOrders.forEach(o => {
-      revenue += o.total;
       o.items.forEach(item => {
         const unitCost = costMap[item.product.id] || 0;
         costs += unitCost * item.quantity;
       });
     });
 
-    // Process manual transactions
+    // 2. Ingresos y Gastos desde el Historial de Transacciones (Fuente de Verdad)
     const validTransactions = transactions.filter(t => t.status !== 'deleted');
     validTransactions.forEach(t => {
-      if (t.type === 'manual_income') {
+      if (t.type === 'payment' || t.type === 'card_payment' || t.type === 'manual_income') {
         revenue += t.amount;
+      } else if (t.type === 'change') {
+        revenue -= t.amount;
       } else if (t.type === 'manual_expense') {
         costs += t.amount;
       } else if (t.type === 'manual_investment' && viewMode === 'inversion') {
@@ -695,7 +697,6 @@ app.post('/api/admin/bakery-batches', async (req, res) => {
   }
 });
 
-// Get all inventory stock levels and costs
 app.get('/api/admin/inventory', async (_req, res) => {
   try {
     const inventory = await db.getInventory();
@@ -706,22 +707,64 @@ app.get('/api/admin/inventory', async (_req, res) => {
   }
 });
 
-// Modify stock level / unit cost for a menu item
+// Update product stock and cost (Legacy)
 app.post('/api/admin/inventory', async (req, res) => {
   try {
     const { productId, stock, cost } = req.body;
     if (!productId || stock === undefined || cost === undefined) {
-       res.status(400).json({ error: 'Faltan parámetros.' });
-       return;
+      res.status(400).json({ error: 'Faltan parámetros.' });
+      return;
     }
 
     await db.updateInventory(productId, stock, cost);
     broadcast({ type: 'inventory_updated' });
 
-    res.json({ message: 'Inventario de producto actualizado con éxito.' });
+    res.json({ message: 'Inventario actualizado con éxito.' });
   } catch (error) {
     console.error('Error al actualizar inventario:', error);
     res.status(500).json({ error: 'Error al actualizar inventario.' });
+  }
+});
+
+// --- NEW V2 ENDPOINTS ---
+app.get('/api/products', async (_req, res) => {
+  try {
+    const products = await db.getProducts();
+    res.json(products);
+  } catch (error) {
+    console.error('Error al obtener productos:', error);
+    res.status(500).json({ error: 'Error al obtener productos.' });
+  }
+});
+
+app.post('/api/products/price', async (req, res) => {
+  try {
+    const { id, price } = req.body;
+    await db.updateProductPrice(id, price);
+    broadcast({ type: 'inventory_updated' });
+    res.json({ message: 'Precio actualizado con éxito.' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al actualizar precio.' });
+  }
+});
+
+app.get('/api/admin/raw-inventory', async (_req, res) => {
+  try {
+    const inv = await db.getRawInventory();
+    res.json(inv);
+  } catch (error) {
+    res.status(500).json({ error: 'Error al obtener inventario de insumos.' });
+  }
+});
+
+app.post('/api/admin/raw-inventory', async (req, res) => {
+  try {
+    const { id, stock, cost } = req.body;
+    await db.updateRawInventory(id, stock, cost);
+    broadcast({ type: 'inventory_updated' });
+    res.json({ message: 'Insumo actualizado con éxito.' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al actualizar insumo.' });
   }
 });
 

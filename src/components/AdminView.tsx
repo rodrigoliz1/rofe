@@ -16,6 +16,14 @@ interface Metrics {
   transactionsCount: number;
 }
 
+interface RawInventoryItem {
+  id: string;
+  name: string;
+  unit: string;
+  stock: number;
+  cost: number;
+}
+
 interface InventoryDbItem {
   product_id: string;
   stock: number;
@@ -59,12 +67,13 @@ export const AdminView: React.FC<AdminViewProps> = ({
   onClose,
   onInventoryUpdate,
 }) => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'cash' | 'inventory' | 'closure'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'cash' | 'costs' | 'raw_inventory' | 'closure'>('dashboard');
   const [metrics, setMetrics] = useState<Metrics>({
     revenue: 0, costs: 0, profit: 0, cashInRegister: 0, transactionsCount: 0,
   });
   const [adjustedRegister, setAdjustedRegister] = useState<Record<string, number>>({});
   const [dbInventory, setDbInventory] = useState<InventoryDbItem[]>([]);
+  const [rawInventory, setRawInventory] = useState<RawInventoryItem[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [, setOrders] = useState<Order[]>([]);
   const [bakeryBatches, setBakeryBatches] = useState<any[]>([]);
@@ -131,6 +140,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
       const iRes = await fetch(getApiUrl('/api/admin/inventory'));
       if (iRes.ok) setDbInventory(await iRes.json());
+
+      const rRes = await fetch(getApiUrl('/api/admin/raw-inventory'));
+      if (rRes.ok) setRawInventory(await rRes.json());
 
       const tRes = await fetch(getApiUrl(`/api/admin/transactions?${queryParams}`));
       if (tRes.ok) setTransactions(await tRes.json());
@@ -257,34 +269,52 @@ export const AdminView: React.FC<AdminViewProps> = ({
     }
   };
 
-  const handleUpdateProductStockCost = async (productId: string, newStock: number, newCost: number) => {
+  const handleUpdateProductPrice = async (productId: string, newPrice: number) => {
     try {
-      const res = await fetch(getApiUrl('/api/admin/inventory'), {
+      const res = await fetch(getApiUrl('/api/products/price'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          productId,
-          stock: newStock,
-          cost: newCost,
-        }),
+        body: JSON.stringify({ id: productId, price: newPrice }),
       });
       if (res.ok) {
         loadAllData();
         onInventoryUpdate();
       } else {
-        alert('Error al actualizar producto.');
+        alert('Error al actualizar precio.');
       }
     } catch (e) {
       alert('Error de red.');
     }
   };
 
-  const getProductStockAndCost = (id: string) => {
-    const dbItem = dbInventory.find(i => i.product_id === id);
-    return {
-      stock: dbItem ? dbItem.stock : 0,
-      cost: dbItem ? dbItem.cost : 0.00
-    };
+  const handleUpdateRawInventory = async (id: string, newStock: number, newCost: number) => {
+    try {
+      const res = await fetch(getApiUrl('/api/admin/raw-inventory'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, stock: newStock, cost: newCost }),
+      });
+      if (res.ok) {
+        loadAllData();
+      } else {
+        alert('Error al actualizar insumo.');
+      }
+    } catch (e) {
+      alert('Error de red.');
+    }
+  };
+
+  const calculateProductCost = (product: Product): number => {
+    if (!product.recipe) return 0;
+    let totalCost = 0;
+    for (const [ingId, qty] of Object.entries(product.recipe)) {
+      const raw = rawInventory.find(r => r.id === ingId);
+      if (raw && raw.stock > 0) {
+        const unitCost = raw.cost / raw.stock;
+        totalCost += (unitCost * Number(qty));
+      }
+    }
+    return totalCost;
   };
 
   // Build chart data
@@ -304,10 +334,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
   if ((adjustedRegister['coin_10'] || 0) < 15) cashAlerts.push('Pocas monedas de $10 (Menos de 15)');
   if ((adjustedRegister['coin_5'] || 0) < 30) cashAlerts.push('Pocas monedas de $5 (Menos de 30)');
 
-  const stockAlerts = products
-    .filter(p => p.category !== 'bakery')
-    .filter(p => getProductStockAndCost(p.id).stock < 30)
-    .map(p => `Stock bajo de ${p.name}: ${getProductStockAndCost(p.id).stock} unidades.`);
+  const stockAlerts = rawInventory
+    .filter(item => item.stock < 100) // General low stock threshold
+    .map(item => `Stock bajo de ${item.name}: ${item.stock} ${item.unit}.`);
 
   const bakeryExpirations = bakeryBatches.filter(b => {
     const expires = new Date(b.expires_at).getTime();
@@ -329,11 +358,14 @@ export const AdminView: React.FC<AdminViewProps> = ({
           <button className={`admin-tab-btn ${activeTab === 'cash' ? 'active' : ''}`} onClick={() => setActiveTab('cash')}>
             Arqueo de Caja ($)
           </button>
-          <button className={`admin-tab-btn ${activeTab === 'inventory' ? 'active' : ''}`} onClick={() => setActiveTab('inventory')}>
-            Costos e Inventario
+          <button className={`admin-tab-btn ${activeTab === 'costs' ? 'active' : ''}`} onClick={() => setActiveTab('costs')}>
+            Costos y Precios
+          </button>
+          <button className={`admin-tab-btn ${activeTab === 'raw_inventory' ? 'active' : ''}`} onClick={() => setActiveTab('raw_inventory')}>
+            Inventario Insumos
           </button>
           <button className={`admin-tab-btn ${activeTab === 'closure' ? 'active' : ''}`} onClick={() => setActiveTab('closure')}>
-            Cierre de Caja
+            Corte de Caja
           </button>
           <button className="admin-exit-btn" onClick={onClose}>CERRAR PANEL</button>
         </div>
@@ -574,44 +606,84 @@ export const AdminView: React.FC<AdminViewProps> = ({
         </div>
       )}
 
-      {activeTab === 'inventory' && (
+      {activeTab === 'costs' && (
         <div className="admin-inventory-container">
-          <h3 className="section-subtitle">COSTOS E INVENTARIO DE PRODUCTOS</h3>
+          <h3 className="section-subtitle">COSTOS Y PRECIOS DE PRODUCTOS</h3>
           <div className="inventory-table-wrapper">
             <table className="inventory-table-admin">
               <thead>
                 <tr>
                   <th>Producto</th>
+                  <th>Costo Preparación (Calculado)</th>
                   <th>Precio Venta</th>
-                  <th>Costo Preparación</th>
-                  <th>Stock Actual</th>
-                  <th>Acciones</th>
+                  <th>Utilidad Bruta</th>
                 </tr>
               </thead>
               <tbody>
                 {products.map((p) => {
-                  const { stock, cost } = getProductStockAndCost(p.id);
+                  const prepCost = calculateProductCost(p);
+                  const grossProfit = p.price - prepCost;
                   return (
-                    <tr key={p.id} className={stock === 0 ? 'stock-depleted-row' : ''}>
-                      <td className="inventory-product-cell">
-                        <span className="font-bold">{p.name}</span>
-                        {stock === 0 && <span className="depleted-hint">AGOTADO</span>}
-                      </td>
-                      <td className="font-bold">${p.price.toFixed(2)} MXN</td>
+                    <tr key={p.id}>
+                      <td className="inventory-product-cell font-bold">{p.name}</td>
+                      <td>${prepCost.toFixed(2)} MXN</td>
                       <td>
                         <div className="cost-input-wrapper">
                           <span>$</span>
-                          <input type="number" className="inventory-input-number" defaultValue={cost} onBlur={(e) => handleUpdateProductStockCost(p.id, stock, parseFloat(e.target.value))} />
+                          <input type="number" className="inventory-input-number" defaultValue={p.price} onBlur={(e) => handleUpdateProductPrice(p.id, parseFloat(e.target.value))} />
+                        </div>
+                      </td>
+                      <td className="font-bold" style={{ color: grossProfit > 0 ? '#10b981' : '#ef4444' }}>
+                        ${grossProfit.toFixed(2)} MXN
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'raw_inventory' && (
+        <div className="admin-inventory-container">
+          <h3 className="section-subtitle">INVENTARIO DE INSUMOS</h3>
+          <div className="inventory-table-wrapper">
+            <table className="inventory-table-admin">
+              <thead>
+                <tr>
+                  <th>Insumo</th>
+                  <th>Stock Actual</th>
+                  <th>Costo Total de Stock</th>
+                  <th>Costo Unitario</th>
+                  <th>Acciones Stock</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rawInventory.map((item) => {
+                  const unitCost = item.stock > 0 ? (item.cost / item.stock) : 0;
+                  return (
+                    <tr key={item.id} className={item.stock === 0 ? 'stock-depleted-row' : ''}>
+                      <td className="inventory-product-cell">
+                        <span className="font-bold">{item.name}</span>
+                      </td>
+                      <td>
+                        <div className="cost-input-wrapper">
+                          <input type="number" className="inventory-input-number" defaultValue={item.stock} onBlur={(e) => handleUpdateRawInventory(item.id, parseFloat(e.target.value), item.cost)} />
+                          <span>{item.unit}</span>
                         </div>
                       </td>
                       <td>
-                        <span className={`stock-level-badge ${stock <= 5 ? 'stock-critical' : 'stock-ok'}`}>{stock} unidades</span>
+                        <div className="cost-input-wrapper">
+                          <span>$</span>
+                          <input type="number" className="inventory-input-number" defaultValue={item.cost} onBlur={(e) => handleUpdateRawInventory(item.id, item.stock, parseFloat(e.target.value))} />
+                        </div>
                       </td>
+                      <td className="font-bold">${unitCost.toFixed(2)} MXN / {item.unit}</td>
                       <td>
                         <div className="inventory-actions-cell">
-                          <button className="stock-adjust-btn btn-stock-minus" onClick={() => handleUpdateProductStockCost(p.id, Math.max(0, stock - 1), cost)}>-1</button>
-                          <button className="stock-adjust-btn btn-stock-plus" onClick={() => handleUpdateProductStockCost(p.id, stock + 1, cost)}>+1</button>
-                          <button className="stock-adjust-btn btn-stock-plus" onClick={() => handleUpdateProductStockCost(p.id, stock + 10, cost)}>+10</button>
+                          <button className="stock-adjust-btn btn-stock-minus" onClick={() => handleUpdateRawInventory(item.id, Math.max(0, item.stock - 10), item.cost)}>-10</button>
+                          <button className="stock-adjust-btn btn-stock-plus" onClick={() => handleUpdateRawInventory(item.id, item.stock + 10, item.cost)}>+10</button>
                         </div>
                       </td>
                     </tr>
