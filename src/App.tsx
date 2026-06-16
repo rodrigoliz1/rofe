@@ -15,8 +15,6 @@ function App() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   
-  const [inventory, setInventory] = useState<any>(null);
-  
   // Dynamic Product Catalog
   const [productCatalog, setProductCatalog] = useState<Product[]>([]);
   const [showCheckout, setShowCheckout] = useState(false);
@@ -195,8 +193,7 @@ function App() {
 
   const handleCheckout = () => setShowCheckout(true);
   const handleCancelOrder = () => setCart([]);
-  
-  const handlePaymentSuccess = (_orderId: string, _customerName: string) => {
+  const handlePaymentSuccess = (orderId: string, customerName: string) => {
     setCart([]);
     setShowCheckout(false);
     setStarted(false);
@@ -260,6 +257,7 @@ function App() {
                 onSelectCategory={handleSelectCategory}
                 selectedCategory={selectedCategory}
                 onProductClick={handleProductClick}
+                inventory={inventory}
               />
               <Cart
                 cart={cart}

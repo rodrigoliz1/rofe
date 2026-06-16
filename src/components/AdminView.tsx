@@ -24,6 +24,12 @@ interface RawInventoryItem {
   cost: number;
 }
 
+interface InventoryDbItem {
+  product_id: string;
+  stock: number;
+  cost: number;
+}
+
 const DENOM_LABELS: Record<string, string> = {
   bill_1000: 'Billetes de $1000',
   bill_500: 'Billetes de $500',
@@ -68,8 +74,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [adjustedRegister, setAdjustedRegister] = useState<Record<string, number>>({});
   const [rawInventory, setRawInventory] = useState<RawInventoryItem[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
-  
-  const [_orders, setOrders] = useState<Order[]>([]);
+  const [, setOrders] = useState<Order[]>([]);
   const [bakeryBatches, setBakeryBatches] = useState<any[]>([]);
 
   const [viewMode, setViewMode] = useState<'operativa' | 'inversion'>('operativa');
@@ -215,7 +220,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
         const err = await res.json();
         setTxError(err.error || 'Error al registrar movimiento.');
       }
-    } catch (_error) {
+    } catch (error) {
       setTxError('Error al conectar con el servidor.');
     }
   };
@@ -255,7 +260,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       } else {
         alert('Error al auditar.');
       }
-    } catch (_e) {
+    } catch (e) {
       alert('Error de conexión.');
     }
   };
@@ -273,7 +278,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       } else {
         alert('Error al actualizar precio.');
       }
-    } catch (_e) {
+    } catch (e) {
       alert('Error de red.');
     }
   };
@@ -290,7 +295,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       } else {
         alert('Error al actualizar insumo.');
       }
-    } catch (_e) {
+    } catch (e) {
       alert('Error de red.');
     }
   };
