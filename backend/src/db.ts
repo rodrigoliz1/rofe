@@ -54,6 +54,19 @@ export interface DbBakeryBatch {
   expires_at: string;
 }
 
+export interface DbDailyClosure {
+  id?: string;
+  closed_at: string;
+  total_sales: number;
+  total_income: number;
+  total_costs: number;
+  net_profit: number;
+  cash_start: number;
+  cash_end: number;
+  products_sold: Record<string, number>;
+  notes?: string;
+}
+
 import { SupabaseDbAdapter } from './supabaseAdapter';
 
 // Order structures match our existing types
@@ -92,6 +105,8 @@ export interface DbAdapter {
   updateCashTransaction(id: number, status: 'deleted' | 'modified', auditReason: string, newAmount?: number): Promise<void>;
   getBakeryBatches(): Promise<DbBakeryBatch[]>;
   addBakeryBatch(batch: DbBakeryBatch): Promise<void>;
+  getDailyClosures(): Promise<DbDailyClosure[]>;
+  createDailyClosure(closure: DbDailyClosure): Promise<void>;
 }
 
 // 1. JSON Local File Database Adapter (for local development / offline fallback)
@@ -103,12 +118,14 @@ class JsonDbAdapter implements DbAdapter {
     cashRegister: Record<string, number>;
     transactions: DbCashTransaction[];
     bakeryBatches: DbBakeryBatch[];
+    dailyClosures: DbDailyClosure[];
   } = {
     orders: [],
     inventory: [],
     cashRegister: {},
     transactions: [],
-    bakeryBatches: []
+    bakeryBatches: [],
+    dailyClosures: []
   };
 
   private async read() {
@@ -167,6 +184,9 @@ class JsonDbAdapter implements DbAdapter {
 
     if (!this.data.bakeryBatches) {
       this.data.bakeryBatches = [];
+    }
+    if (!this.data.dailyClosures) {
+      this.data.dailyClosures = [];
     }
 
     await this.save();
@@ -324,6 +344,18 @@ class JsonDbAdapter implements DbAdapter {
       id: this.data.bakeryBatches.length + 1
     };
     this.data.bakeryBatches.push(newBatch);
+    await this.save();
+  }
+
+  async getDailyClosures(): Promise<DbDailyClosure[]> {
+    await this.read();
+    return this.data.dailyClosures || [];
+  }
+
+  async createDailyClosure(closure: DbDailyClosure): Promise<void> {
+    await this.read();
+    if (!this.data.dailyClosures) this.data.dailyClosures = [];
+    this.data.dailyClosures.push(closure);
     await this.save();
   }
 }

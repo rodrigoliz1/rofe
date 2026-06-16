@@ -35,7 +35,9 @@ function App() {
     try {
       const res = await fetch(getApiUrl('/api/products'));
       if (res.ok) {
-        setProductCatalog(await res.json());
+        const data = await res.json();
+        data.sort((a: any, b: any) => a.name.localeCompare(b.name));
+        setProductCatalog(data);
       }
     } catch (e) {
       console.error('Error fetching products:', e);
@@ -230,7 +232,7 @@ function App() {
         <AdminView
           products={productCatalog}
           onClose={() => setViewMode('client')}
-          onInventoryUpdate={loadInventory}
+          onInventoryUpdate={loadProducts}
         />
       )}
 

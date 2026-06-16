@@ -330,4 +330,43 @@ export class SupabaseDbAdapter implements DbAdapter {
     });
     if (error) throw error;
   }
+  // Daily Closures methods
+  async getDailyClosures(): Promise<import('./db').DbDailyClosure[]> {
+    const { data, error } = await this.supabase
+      .from('daily_closures')
+      .select('*')
+      .order('closed_at', { ascending: false });
+    
+    if (error) throw error;
+    
+    return data.map(row => ({
+      id: row.id,
+      closed_at: row.closed_at,
+      total_sales: parseFloat(row.total_sales),
+      total_income: parseFloat(row.total_income),
+      total_costs: parseFloat(row.total_costs),
+      net_profit: parseFloat(row.net_profit),
+      cash_start: parseFloat(row.cash_start),
+      cash_end: parseFloat(row.cash_end),
+      products_sold: typeof row.products_sold === 'string' ? JSON.parse(row.products_sold) : row.products_sold,
+      notes: row.notes
+    }));
+  }
+
+  async createDailyClosure(closure: import('./db').DbDailyClosure): Promise<void> {
+    const { error } = await this.supabase.from('daily_closures').insert([{
+      closed_at: closure.closed_at,
+      total_sales: closure.total_sales,
+      total_income: closure.total_income,
+      total_costs: closure.total_costs,
+      net_profit: closure.net_profit,
+      cash_start: closure.cash_start,
+      cash_end: closure.cash_end,
+      products_sold: closure.products_sold,
+      notes: closure.notes
+    }]);
+    
+    if (error) throw error;
+  }
+
 }
