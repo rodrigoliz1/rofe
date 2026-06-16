@@ -160,12 +160,12 @@ export const AdminView: React.FC<AdminViewProps> = ({
       const method = isNew ? 'POST' : 'PUT';
       const endpoint = isNew ? '/api/products' : `/api/products/${p.id}`;
 
-      await fetch(getApiUrl(endpoint), {
+      const res = await fetch(getApiUrl(endpoint), {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(pToSave)
       });
-      
+      if (!res.ok) throw new Error(await res.text());
       setEditingProduct(null);
       onInventoryUpdate(); // Reload products
     } catch (e) {
@@ -1170,13 +1170,18 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
             {showRawItemDetailModal && quickAddSelection && (
         <div className="checkout-modal-overlay" style={{ backdropFilter: 'blur(5px)' }} onClick={() => setShowRawItemDetailModal(false)}>
-          <div className="barista-modal-dialog" onClick={e => e.stopPropagation()} style={{textAlign: 'center', maxWidth: 450, position: 'relative'}}>
+          <div className="barista-modal-dialog" onClick={e => e.stopPropagation()} style={{ maxWidth: 600, width: '90%', maxHeight: '90vh', overflowY: 'auto', textAlign: 'left' }}>
             <button className="barista-modal-close" onClick={() => setShowRawItemDetailModal(false)}>✕</button>
 
             {rawModalView === 'details' && (
               <>
-                <div style={{fontSize: '4rem', marginBottom: 10}}>{quickAddSelection.name.match(/[\p{Emoji}\u200d]+/gu)?.[0] || '📦'}</div>
-                <h2 style={{color: '#fff', marginBottom: 20, fontSize: '1.8rem'}}>{quickAddSelection.name.replace(/[\p{Emoji}\u200d]+/gu, '').trim()}</h2>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 20, paddingBottom: 20, borderBottom: '1px solid #444' }}>
+                  <div style={{ fontSize: '4rem', background: '#1c1c1c', padding: '10px 20px', borderRadius: 12 }}>{quickAddSelection.name.match(/[\p{Emoji}\u200d]+/gu)?.[0] || '📦'}</div>
+                  <div>
+                    <h2 style={{ color: '#fff', margin: 0, fontSize: '2rem' }}>{quickAddSelection.name.replace(/[\p{Emoji}\u200d]+/gu, '').trim()}</h2>
+                    <p style={{ color: '#888', margin: '5px 0 0 0', fontSize: '1.1rem' }}>Detalle de Insumo</p>
+                  </div>
+                </div>
                 
                 <div style={{background: '#1c1c1c', borderRadius: 12, padding: 20, marginBottom: 20}}>
                   <p style={{fontSize: '1rem', color: '#888', marginBottom: 5}}>Stock Disponible</p>
@@ -1256,8 +1261,14 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
       {showNewRawItemModal && (
         <div className="barista-modal-backdrop" onClick={() => setShowNewRawItemModal(false)}>
-          <div className="barista-modal-dialog" onClick={e => e.stopPropagation()}>
-            <h2 style={{color: '#ea580c', marginBottom: 20}}>Nuevo Insumo</h2>
+          <div className="barista-modal-dialog" onClick={e => e.stopPropagation()} style={{ maxWidth: 600, width: '90%', maxHeight: '90vh', overflowY: 'auto', textAlign: 'left' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 20, paddingBottom: 20, borderBottom: '1px solid #444' }}>
+              <div style={{ fontSize: '3rem', background: '#1c1c1c', padding: '10px 20px', borderRadius: 12 }}>📦</div>
+              <div>
+                <h2 style={{ color: '#fff', margin: 0, fontSize: '2rem' }}>Añadir Nuevo Insumo</h2>
+                <p style={{ color: '#888', margin: '5px 0 0 0', fontSize: '1.1rem' }}>Ingresa los detalles para agregarlo al inventario.</p>
+              </div>
+            </div>
             <div className="admin-form-group">
               <label>Nombre y Emoji (Ej. 🥛 Leche Entera)</label>
               <input type="text" className="admin-input-text" value={newRawName} onChange={e => setNewRawName(e.target.value)} placeholder="☕️ Grano Espresso" />

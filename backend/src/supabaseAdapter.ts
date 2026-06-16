@@ -210,6 +210,7 @@ export class SupabaseDbAdapter implements DbAdapter {
       customizable: row.customizable,
       image: row.image,
       recipe: row.recipe,
+      custom_variants: row.custom_variants || [],
     }));
   }
 
