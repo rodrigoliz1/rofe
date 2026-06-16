@@ -118,9 +118,9 @@ export const ProductEditorModal: React.FC<ProductEditorModalProps> = ({ product,
   };
 
   return (
-    <div className="modal-overlay" style={{ backdropFilter: 'blur(5px)', zIndex: 10000 }}>
-      <div className="modal-content" style={{ maxWidth: 800, width: '90%', maxHeight: '90vh', overflowY: 'auto' }}>
-        <button className="close-btn" onClick={onClose}>&times;</button>
+    <div className="barista-modal-backdrop" style={{ backdropFilter: 'blur(5px)', zIndex: 10000 }}>
+      <div className="barista-modal-dialog" style={{ maxWidth: 800, width: '90%', maxHeight: '90vh', overflowY: 'auto' }}>
+        <button className="barista-modal-close" onClick={onClose}>&times;</button>
         <h2 style={{ marginBottom: 20 }}>{product ? 'Editar Producto' : 'Añadir Nuevo Producto'}</h2>
 
         <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>

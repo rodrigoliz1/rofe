@@ -11,8 +11,8 @@ const PORT = process.env.PORT || 3000;
 app.use(cors({
   origin: '*' // Allow all origins for easier PWA access on local network
 }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // --- Server-Sent Events (SSE) Client List ---
 let clients: express.Response[] = [];
@@ -755,6 +755,39 @@ app.get('/api/products', async (_req, res) => {
   } catch (error) {
     console.error('Error al obtener productos:', error);
     res.status(500).json({ error: 'Error al obtener productos.' });
+  }
+});
+
+app.post('/api/products', async (req, res) => {
+  try {
+    await db.createProduct(req.body);
+    broadcast({ type: 'inventory_updated' });
+    res.status(201).json({ message: 'Producto creado' });
+  } catch (error) {
+    console.error('Error al crear producto:', error);
+    res.status(500).json({ error: 'Error al crear producto' });
+  }
+});
+
+app.put('/api/products/:id', async (req, res) => {
+  try {
+    await db.updateProduct(req.params.id, req.body);
+    broadcast({ type: 'inventory_updated' });
+    res.json({ message: 'Producto actualizado' });
+  } catch (error) {
+    console.error('Error al actualizar producto:', error);
+    res.status(500).json({ error: 'Error al actualizar producto' });
+  }
+});
+
+app.delete('/api/products/:id', async (req, res) => {
+  try {
+    await db.deleteProduct(req.params.id);
+    broadcast({ type: 'inventory_updated' });
+    res.json({ message: 'Producto eliminado' });
+  } catch (error) {
+    console.error('Error al eliminar producto:', error);
+    res.status(500).json({ error: 'Error al eliminar producto' });
   }
 });
 
