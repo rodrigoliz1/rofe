@@ -680,6 +680,40 @@ class PostgresDbAdapter implements DbAdapter {
       ]
     );
   }
+
+  async getDailyClosures(): Promise<DbDailyClosure[]> {
+    const res = await this.client.query('SELECT * FROM daily_closures ORDER BY closed_at DESC');
+    return res.rows.map(row => ({
+      id: row.id,
+      closed_at: row.closed_at,
+      total_sales: parseFloat(row.total_sales),
+      total_income: parseFloat(row.total_income),
+      total_costs: parseFloat(row.total_costs),
+      net_profit: parseFloat(row.net_profit),
+      cash_start: parseFloat(row.cash_start),
+      cash_end: parseFloat(row.cash_end),
+      products_sold: typeof row.products_sold === 'string' ? JSON.parse(row.products_sold) : row.products_sold,
+      notes: row.notes
+    }));
+  }
+
+  async createDailyClosure(closure: DbDailyClosure): Promise<void> {
+    await this.client.query(
+      `INSERT INTO daily_closures (closed_at, total_sales, total_income, total_costs, net_profit, cash_start, cash_end, products_sold, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        new Date(closure.closed_at),
+        closure.total_sales,
+        closure.total_income,
+        closure.total_costs,
+        closure.net_profit,
+        closure.cash_start,
+        closure.cash_end,
+        JSON.stringify(closure.products_sold),
+        closure.notes || null
+      ]
+    );
+  }
 }
 
 // Export singleton instance based on environment variables
