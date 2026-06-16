@@ -128,7 +128,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             customerName,
             items: cartItems,
             total,
-            status: 'pending',
+            status: paymentMethod === 'cash' ? 'pending_cash_payment' : 'pending_payment',
             paymentMethod,
             createdAt: new Date().toISOString()
           };

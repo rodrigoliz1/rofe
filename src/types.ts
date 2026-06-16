@@ -9,6 +9,7 @@ export interface Product {
   image?: string;
   stock?: number; // Added for inventory management
   cost?: number; // Added for cost management
+  recipe?: Record<string, number>; // Recipe logic
 }
 
 export interface CustomizationOptions {

@@ -72,7 +72,6 @@ export const AdminView: React.FC<AdminViewProps> = ({
     revenue: 0, costs: 0, profit: 0, cashInRegister: 0, transactionsCount: 0,
   });
   const [adjustedRegister, setAdjustedRegister] = useState<Record<string, number>>({});
-  const [dbInventory, setDbInventory] = useState<InventoryDbItem[]>([]);
   const [rawInventory, setRawInventory] = useState<RawInventoryItem[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [, setOrders] = useState<Order[]>([]);
@@ -137,9 +136,6 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
       const cRes = await fetch(getApiUrl('/api/admin/cash'));
       if (cRes.ok) setAdjustedRegister(await cRes.json());
-
-      const iRes = await fetch(getApiUrl('/api/admin/inventory'));
-      if (iRes.ok) setDbInventory(await iRes.json());
 
       const rRes = await fetch(getApiUrl('/api/admin/raw-inventory'));
       if (rRes.ok) setRawInventory(await rRes.json());
