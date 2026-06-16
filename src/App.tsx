@@ -15,6 +15,9 @@ function App() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   
+  // RESTAURADO: Estado de inventario para no perder funcionalidad
+  const [inventory, setInventory] = useState<any>(null);
+  
   // Dynamic Product Catalog
   const [productCatalog, setProductCatalog] = useState<Product[]>([]);
   const [showCheckout, setShowCheckout] = useState(false);
@@ -193,7 +196,9 @@ function App() {
 
   const handleCheckout = () => setShowCheckout(true);
   const handleCancelOrder = () => setCart([]);
-  const handlePaymentSuccess = (orderId: string, customerName: string) => {
+  
+  // CORREGIDO: Guiones bajos para variables que no se usan internamente en esta función
+  const handlePaymentSuccess = (_orderId: string, _customerName: string) => {
     setCart([]);
     setShowCheckout(false);
     setStarted(false);
