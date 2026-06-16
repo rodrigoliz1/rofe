@@ -16,7 +16,7 @@ export interface DbCashRegister {
 
 export interface DbCashTransaction {
   id?: number;
-  type: 'payment' | 'change' | 'manual_income' | 'manual_expense' | 'adjustment';
+  type: 'payment' | 'change' | 'manual_income' | 'manual_expense' | 'adjustment' | 'manual_investment' | 'card_payment';
   amount: number;
   description: string;
   denominations: Record<string, number>;
@@ -246,8 +246,8 @@ class JsonDbAdapter implements DbAdapter {
     // Update cash register counts
     if (this.data.cashRegister) {
       Object.entries(transaction.denominations).forEach(([denom, count]) => {
-        // If type is change or manual_expense, we subtract. Otherwise we add
-        const multiplier = (transaction.type === 'change' || transaction.type === 'manual_expense') ? -1 : 1;
+        // If type is change, manual_expense, or manual_investment, we subtract. Otherwise we add
+        const multiplier = (transaction.type === 'change' || transaction.type === 'manual_expense' || transaction.type === 'manual_investment') ? -1 : 1;
         this.data.cashRegister[denom] = Math.max(0, (this.data.cashRegister[denom] || 0) + (count * multiplier));
       });
     }
@@ -537,7 +537,7 @@ class PostgresDbAdapter implements DbAdapter {
     );
 
     // Update register counts
-    const multiplier = (transaction.type === 'change' || transaction.type === 'manual_expense') ? -1 : 1;
+    const multiplier = (transaction.type === 'change' || transaction.type === 'manual_expense' || transaction.type === 'manual_investment') ? -1 : 1;
     for (const [denom, count] of Object.entries(transaction.denominations)) {
       await this.client.query(
         `INSERT INTO cash_register (denomination, count)

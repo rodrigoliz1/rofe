@@ -69,8 +69,15 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [, setOrders] = useState<Order[]>([]);
   const [bakeryBatches, setBakeryBatches] = useState<any[]>([]);
 
+  const [viewMode, setViewMode] = useState<'operativa' | 'inversion'>('operativa');
+  const [datePreset, setDatePreset] = useState<'today' | 'this_month' | 'this_year' | 'custom'>('today');
+  
+  // Format YYYY-MM-DD
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
+
   // Form for manual transactions
-  const [txType, setTxType] = useState<'manual_income' | 'manual_expense'>('manual_expense');
+  const [txType, setTxType] = useState<'manual_income' | 'manual_expense' | 'manual_investment'>('manual_expense');
   const [txAmount, setTxAmount] = useState('');
   const [txDescription, setTxDescription] = useState('');
   const [txError, setTxError] = useState('');
@@ -92,7 +99,31 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
   const loadAllData = async () => {
     try {
-      const mRes = await fetch(getApiUrl('/api/admin/metrics'));
+      let startDate = '';
+      let endDate = '';
+      const now = new Date();
+      
+      if (datePreset === 'today') {
+        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        startDate = startOfDay.toISOString();
+      } else if (datePreset === 'this_month') {
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        startDate = startOfMonth.toISOString();
+      } else if (datePreset === 'this_year') {
+        const startOfYear = new Date(now.getFullYear(), 0, 1);
+        startDate = startOfYear.toISOString();
+      } else if (datePreset === 'custom') {
+        if (customStartDate) startDate = new Date(`${customStartDate}T00:00:00`).toISOString();
+        if (customEndDate) endDate = new Date(`${customEndDate}T23:59:59`).toISOString();
+      }
+
+      const queryParams = new URLSearchParams({
+        viewMode,
+        ...(startDate && { startDate }),
+        ...(endDate && { endDate })
+      }).toString();
+
+      const mRes = await fetch(getApiUrl(`/api/admin/metrics?${queryParams}`));
       if (mRes.ok) setMetrics(await mRes.json());
 
       const cRes = await fetch(getApiUrl('/api/admin/cash'));
@@ -101,7 +132,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       const iRes = await fetch(getApiUrl('/api/admin/inventory'));
       if (iRes.ok) setDbInventory(await iRes.json());
 
-      const tRes = await fetch(getApiUrl('/api/admin/transactions'));
+      const tRes = await fetch(getApiUrl(`/api/admin/transactions?${queryParams}`));
       if (tRes.ok) setTransactions(await tRes.json());
 
       const oRes = await fetch(getApiUrl('/api/orders'));
@@ -116,7 +147,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
   useEffect(() => {
     loadAllData();
-  }, [activeTab]);
+  }, [activeTab, viewMode, datePreset, customStartDate, customEndDate]);
 
   const handleAdjustDenom = (denom: string, val: number) => {
     setAdjustedRegister(prev => ({
@@ -310,9 +341,44 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
       {activeTab === 'dashboard' && (
         <div className="admin-dashboard-container">
+          {/* CONTROL BAR: VIEW MODE & DATE RANGE */}
+          <div className="dashboard-controls" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#1c1c1c', padding: '15px 20px', borderRadius: 12, marginBottom: 20 }}>
+            <div className="view-mode-toggles" style={{ display: 'flex', gap: 10 }}>
+              <button 
+                className={`admin-tab-btn ${viewMode === 'operativa' ? 'active' : ''}`} 
+                style={{ borderColor: viewMode === 'operativa' ? '#ea580c' : 'transparent', color: viewMode === 'operativa' ? '#ea580c' : '#888' }}
+                onClick={() => setViewMode('operativa')}
+              >
+                📊 Vista Operativa
+              </button>
+              <button 
+                className={`admin-tab-btn ${viewMode === 'inversion' ? 'active' : ''}`} 
+                style={{ borderColor: viewMode === 'inversion' ? '#3b82f6' : 'transparent', color: viewMode === 'inversion' ? '#3b82f6' : '#888' }}
+                onClick={() => setViewMode('inversion')}
+              >
+                🏢 Vista Inversión
+              </button>
+            </div>
+            <div className="date-range-controls" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <select className="admin-input-text" style={{ padding: '8px 12px', width: 'auto' }} value={datePreset} onChange={e => setDatePreset(e.target.value as any)}>
+                <option value="today">Hoy</option>
+                <option value="this_month">Este Mes</option>
+                <option value="this_year">Este Año</option>
+                <option value="custom">Personalizado...</option>
+              </select>
+              {datePreset === 'custom' && (
+                <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+                  <input type="date" className="admin-input-text" style={{ padding: '8px', width: 'auto' }} value={customStartDate} onChange={e => setCustomStartDate(e.target.value)} />
+                  <span style={{ color: '#888' }}>a</span>
+                  <input type="date" className="admin-input-text" style={{ padding: '8px', width: 'auto' }} value={customEndDate} onChange={e => setCustomEndDate(e.target.value)} />
+                </div>
+              )}
+            </div>
+          </div>
+
           <div className="metrics-row">
             <div className="metric-card card-revenue">
-              <span className="metric-label">INGRESOS DE HOY</span>
+              <span className="metric-label">INGRESOS</span>
               <span className="metric-value">${metrics.revenue.toFixed(2)} MXN</span>
             </div>
             <div className="metric-card card-costs">
@@ -337,7 +403,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 <XAxis dataKey="name" stroke="#888" />
                 <YAxis stroke="#888" />
                 <Tooltip cursor={{fill: '#2c2c2c'}} contentStyle={{ background: '#111', border: '1px solid #333' }} />
-                <Bar dataKey="valor" fill="#ea580c" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="valor" fill={viewMode === 'inversion' ? '#3b82f6' : '#ea580c'} radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -350,10 +416,13 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   <label className="form-label">Tipo de Movimiento:</label>
                   <div className="tx-type-selector">
                     <button type="button" className={`type-select-btn expense ${txType === 'manual_expense' ? 'selected' : ''}`} onClick={() => setTxType('manual_expense')}>
-                      EGRESO (Retiro/Insumos)
+                      EGRESO (Op)
                     </button>
                     <button type="button" className={`type-select-btn income ${txType === 'manual_income' ? 'selected' : ''}`} onClick={() => setTxType('manual_income')}>
-                      INGRESO (Manual)
+                      INGRESO (Op)
+                    </button>
+                    <button type="button" className={`type-select-btn investment ${txType === 'manual_investment' ? 'selected' : ''}`} style={{ borderColor: txType === 'manual_investment' ? '#3b82f6' : '#333', color: txType === 'manual_investment' ? '#3b82f6' : '#888' }} onClick={() => setTxType('manual_investment')}>
+                      INVERSIÓN
                     </button>
                   </div>
                 </div>
@@ -385,7 +454,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         <tr key={tx.id} style={{ opacity: tx.status === 'deleted' ? 0.5 : 1 }}>
                           <td>{new Date(tx.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
                           <td>
-                            <span className={`tx-badge ${tx.type.includes('income') || tx.type === 'payment' ? 'tx-badge-income' : 'tx-badge-expense'}`}>
+                            <span className={`tx-badge ${tx.type.includes('income') || tx.type === 'payment' ? 'tx-badge-income' : (tx.type === 'card_payment' ? 'tx-badge-card' : (tx.type === 'manual_investment' ? 'tx-badge-investment' : 'tx-badge-expense'))}`}
+                                  style={{
+                                    ...(tx.type === 'card_payment' ? { background: 'rgba(59, 130, 246, 0.1)', color: '#60a5fa', borderColor: '#3b82f6' } : {}),
+                                    ...(tx.type === 'manual_investment' ? { background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', borderColor: '#2563eb' } : {})
+                                  }}>
                               {tx.type}
                             </span>
                             <div className="tx-desc-hint" style={{ textDecoration: tx.status === 'deleted' ? 'line-through' : 'none' }}>

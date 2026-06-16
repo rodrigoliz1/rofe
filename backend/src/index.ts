@@ -293,6 +293,16 @@ app.post('/api/webhooks/mercadopago', async (req, res) => {
 
           console.log(`✅ Pedido ${orderId} marcado como PAGADO.`);
 
+          // Log card payment transaction
+          if (paidOrder) {
+            await db.addCashTransaction({
+              type: 'card_payment',
+              amount: paidOrder.total,
+              description: `Pago con tarjeta (Físico) para orden ${paidOrder.id}`,
+              denominations: {}
+            });
+          }
+
           // Disparar evento a la web para cerrar el modal
           broadcast({
             type: 'order_paid',
@@ -348,6 +358,16 @@ app.post('/api/webhooks/mercadopago', async (req, res) => {
               const paidOrder = updatedOrders.find(o => o.id === orderId);
 
               console.log(`✅ Pedido ${orderId} marcado como PAGADO (Fallback).`);
+              
+              if (paidOrder) {
+                await db.addCashTransaction({
+                  type: 'card_payment',
+                  amount: paidOrder.total,
+                  description: `Pago con tarjeta (Digital/Fallback) para orden ${paidOrder.id}`,
+                  denominations: {}
+                });
+              }
+
               broadcast({ type: 'order_paid', orderId: orderId, order: paidOrder });
             }
           }
@@ -380,6 +400,15 @@ app.post('/api/orders/:id/simulate-payment', async (req, res) => {
 
     console.log(`[SIMULACIÓN] Pedido ${paidOrder.id} marcado como PAGADO manualmente.`);
 
+    if (paidOrder && paidOrder.paymentMethod === 'card') {
+      await db.addCashTransaction({
+        type: 'card_payment',
+        amount: paidOrder.total,
+        description: `Pago con tarjeta (Simulado) para orden ${paidOrder.id}`,
+        denominations: {}
+      });
+    }
+
     // Broadcast status to clients
     broadcast({
       type: 'order_paid',
@@ -410,12 +439,26 @@ app.post('/api/orders/clear', async (_req, res) => {
 // --- Admin Endpoints ---
 
 // Get administrative dashboard metrics
-app.get('/api/admin/metrics', async (_req, res) => {
+app.get('/api/admin/metrics', async (req, res) => {
   try {
-    const orders = await db.getOrders();
+    const { startDate, endDate, viewMode } = req.query;
+
+    let orders = await db.getOrders();
+    let transactions = await db.getTransactionLedger();
     const inventory = await db.getInventory();
     const register = await db.getCashRegister();
-    const transactions = await db.getTransactionLedger();
+
+    // Filter by dates if provided
+    if (startDate) {
+      const start = new Date(startDate as string).getTime();
+      orders = orders.filter(o => new Date(o.createdAt).getTime() >= start);
+      transactions = transactions.filter(t => new Date(t.created_at!).getTime() >= start);
+    }
+    if (endDate) {
+      const end = new Date(endDate as string).getTime();
+      orders = orders.filter(o => new Date(o.createdAt).getTime() <= end);
+      transactions = transactions.filter(t => new Date(t.created_at!).getTime() <= end);
+    }
 
     // Cost lookup map
     const costMap: Record<string, number> = {};
@@ -434,6 +477,18 @@ app.get('/api/admin/metrics', async (_req, res) => {
         const unitCost = costMap[item.product.id] || 0;
         costs += unitCost * item.quantity;
       });
+    });
+
+    // Process manual transactions
+    const validTransactions = transactions.filter(t => t.status !== 'deleted');
+    validTransactions.forEach(t => {
+      if (t.type === 'manual_income') {
+        revenue += t.amount;
+      } else if (t.type === 'manual_expense') {
+        costs += t.amount;
+      } else if (t.type === 'manual_investment' && viewMode === 'inversion') {
+        costs += t.amount;
+      }
     });
 
     // Calculate cash in register
@@ -499,7 +554,7 @@ app.post('/api/admin/cash/transaction', async (req, res) => {
     }
 
     await db.addCashTransaction({
-      type: type as 'manual_income' | 'manual_expense',
+      type: type as 'manual_income' | 'manual_expense' | 'manual_investment',
       amount,
       description,
       denominations: denominations || {}
@@ -514,9 +569,20 @@ app.post('/api/admin/cash/transaction', async (req, res) => {
 });
 
 // Get manual cash ledger transactions
-app.get('/api/admin/transactions', async (_req, res) => {
+app.get('/api/admin/transactions', async (req, res) => {
   try {
-    const ledger = await db.getTransactionLedger();
+    const { startDate, endDate } = req.query;
+    let ledger = await db.getTransactionLedger();
+    
+    if (startDate) {
+      const start = new Date(startDate as string).getTime();
+      ledger = ledger.filter(t => new Date(t.created_at!).getTime() >= start);
+    }
+    if (endDate) {
+      const end = new Date(endDate as string).getTime();
+      ledger = ledger.filter(t => new Date(t.created_at!).getTime() <= end);
+    }
+
     res.json(ledger);
   } catch (error) {
     console.error('Error al obtener historial de movimientos:', error);
