@@ -14,8 +14,8 @@ const targetStr = `  const handleAdd = () => {
       customization,
       totalPrice,
     };
+
     onAddToCart(cartItem);
-    onClose();
   };`;
 
 const repStr = `  const handleAdd = () => {
@@ -31,6 +31,7 @@ const repStr = `  const handleAdd = () => {
       selectedCustomVariants,
       totalPrice,
     };
+
     onAddToCart(cartItem);
     onClose();
   };

@@ -79,7 +79,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
   const handleAdd = () => {
     // Generate a unique ID based on product ID and customization options
-    const customizationString = JSON.stringify(customization);
+    const customizationString = JSON.stringify({ ...customization, selectedCustomVariants });
     const uniqueId = `${product.id}-${btoa(customizationString).substring(0, 8)}`;
 
     const cartItem: CartItem = {
@@ -87,10 +87,24 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       product,
       quantity,
       customization,
+      selectedCustomVariants,
       totalPrice,
     };
 
     onAddToCart(cartItem);
+    onClose();
+  };
+
+  const handleCustomVariantChange = (groupTitle: string, optionName: string) => {
+    setSelectedCustomVariants(prev => {
+      const next = { ...prev };
+      if (next[groupTitle] === optionName) {
+        delete next[groupTitle]; // toggle off
+      } else {
+        next[groupTitle] = optionName;
+      }
+      return next;
+    });
   };
 
   const isCoffeeOrCold = product.category === 'coffee' || product.category === 'cold';
@@ -247,6 +261,27 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                   Servir al tiempo
                 </button>
               </div>
+            </div>
+          )}
+          {/* CUSTOM VARIANTS RENDERING */}
+          {product.custom_variants && product.custom_variants.length > 0 && (
+            <div className="customization-section" style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 15, marginTop: 15 }}>
+              {product.custom_variants.map(group => (
+                <div key={group.title} style={{ marginBottom: 15 }}>
+                  <h4 className="section-label">{group.title}</h4>
+                  <div className="options-selector">
+                    {group.options.map(opt => (
+                      <button
+                        key={opt.name}
+                        className={`option-btn ${selectedCustomVariants[group.title] === opt.name ? 'active' : ''}`}
+                        onClick={() => handleCustomVariantChange(group.title, opt.name)}
+                      >
+                        {opt.name} {opt.priceModifier ? `(+${opt.priceModifier})` : ''}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>
