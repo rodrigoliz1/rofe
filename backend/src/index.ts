@@ -748,6 +748,22 @@ app.post('/api/products/price', async (req, res) => {
   }
 });
 
+app.post('/api/products/recipe', async (req, res) => {
+  try {
+    const { productId, recipe } = req.body;
+    if (!productId || !recipe) {
+      res.status(400).json({ error: 'Faltan parámetros.' });
+      return;
+    }
+    await db.updateProductRecipe(productId, recipe);
+    broadcast({ type: 'inventory_updated' });
+    res.json({ message: 'Receta actualizada con éxito.' });
+  } catch (error) {
+    console.error('Error al actualizar receta:', error);
+    res.status(500).json({ error: 'Error al actualizar receta.' });
+  }
+});
+
 app.get('/api/admin/raw-inventory', async (_req, res) => {
   try {
     const inv = await db.getRawInventory();
@@ -765,6 +781,77 @@ app.post('/api/admin/raw-inventory', async (req, res) => {
     res.json({ message: 'Insumo actualizado con éxito.' });
   } catch (error) {
     res.status(500).json({ error: 'Error al actualizar insumo.' });
+  }
+});
+
+app.post('/api/admin/raw-inventory/add-item', async (req, res) => {
+  try {
+    const { id, name, unit, stock, cost } = req.body;
+    if (!id || !name || !unit) {
+      res.status(400).json({ error: 'Faltan parámetros básicos (id, name, unit).' });
+      return;
+    }
+    await db.createRawInventoryItem({
+      id, name, unit,
+      stock: stock || 0,
+      cost: cost || 0
+    });
+    
+    // If the initial creation includes a cost > 0, we could log it, but let's assume
+    // adding an item initially might be just setting up the system unless requested.
+    // Actually, user said: "iniciará en ceros todo. Necesito que cada cosa que agregue de ingredientes/insumos, se agregue a costos/egresos."
+    // So if they add initial stock/cost, we should log it.
+    if (cost > 0) {
+      await db.addCashTransaction({
+        type: 'manual_expense',
+        amount: cost,
+        description: `Compra inicial de insumo: ${name} (${stock} ${unit})`,
+        denominations: {}
+      });
+    }
+
+    broadcast({ type: 'inventory_updated' });
+    res.json({ message: 'Insumo creado con éxito.' });
+  } catch (error) {
+    console.error('Error al crear insumo:', error);
+    res.status(500).json({ error: 'Error al crear insumo.' });
+  }
+});
+
+app.post('/api/admin/raw-inventory/purchase', async (req, res) => {
+  try {
+    const { id, addedStock, addedCost } = req.body;
+    if (!id || addedStock === undefined || addedCost === undefined) {
+      res.status(400).json({ error: 'Faltan parámetros.' });
+      return;
+    }
+
+    const inv = await db.getRawInventory();
+    const item = inv.find(i => i.id === id);
+    if (!item) {
+      res.status(404).json({ error: 'Insumo no encontrado.' });
+      return;
+    }
+
+    const newStock = item.stock + addedStock;
+    const newCost = item.cost + addedCost;
+
+    await db.updateRawInventory(id, newStock, newCost);
+
+    if (addedCost > 0) {
+      await db.addCashTransaction({
+        type: 'manual_expense',
+        amount: addedCost,
+        description: `Compra de insumo: ${item.name} (+${addedStock} ${item.unit})`,
+        denominations: {}
+      });
+    }
+
+    broadcast({ type: 'inventory_updated' });
+    res.json({ message: 'Compra registrada con éxito.' });
+  } catch (error) {
+    console.error('Error al registrar compra:', error);
+    res.status(500).json({ error: 'Error al registrar compra.' });
   }
 });
 

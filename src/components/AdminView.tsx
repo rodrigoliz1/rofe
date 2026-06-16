@@ -93,6 +93,21 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [auditReason, setAuditReason] = useState('');
   const [auditNewAmount, setAuditNewAmount] = useState('');
 
+  // Modals state
+  const [editingRecipeProduct, setEditingRecipeProduct] = useState<Product | null>(null);
+  const [editingRecipe, setEditingRecipe] = useState<Record<string, number>>({});
+  
+  const [showQuickAddModal, setShowQuickAddModal] = useState(false);
+  const [quickAddSelection, setQuickAddSelection] = useState<RawInventoryItem | null>(null);
+  const [quickAddQuantity, setQuickAddQuantity] = useState('');
+  const [quickAddCost, setQuickAddCost] = useState('');
+
+  const [showNewRawItemModal, setShowNewRawItemModal] = useState(false);
+  const [newRawName, setNewRawName] = useState('');
+  const [newRawUnit, setNewRawUnit] = useState('g');
+  const [newRawStock, setNewRawStock] = useState('');
+  const [newRawCost, setNewRawCost] = useState('');
+
   const getApiUrl = (path: string) => {
     const base = import.meta.env.VITE_API_URL || 
                  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.')
@@ -279,17 +294,78 @@ export const AdminView: React.FC<AdminViewProps> = ({
     }
   };
 
-  const handleUpdateRawInventory = async (id: string, newStock: number, newCost: number) => {
+
+
+  const handleSaveRecipe = async () => {
+    if (!editingRecipeProduct) return;
     try {
-      const res = await fetch(getApiUrl('/api/admin/raw-inventory'), {
+      const res = await fetch(getApiUrl('/api/products/recipe'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, stock: newStock, cost: newCost }),
+        body: JSON.stringify({ productId: editingRecipeProduct.id, recipe: editingRecipe }),
       });
       if (res.ok) {
+        setEditingRecipeProduct(null);
+        setEditingRecipe({});
         loadAllData();
       } else {
-        alert('Error al actualizar insumo.');
+        alert('Error al guardar la receta.');
+      }
+    } catch (e) {
+      alert('Error de red.');
+    }
+  };
+
+  const handleSaveQuickAdd = async () => {
+    if (!quickAddSelection || !quickAddQuantity || !quickAddCost) return;
+    try {
+      const res = await fetch(getApiUrl('/api/admin/raw-inventory/purchase'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          id: quickAddSelection.id, 
+          addedStock: parseFloat(quickAddQuantity), 
+          addedCost: parseFloat(quickAddCost) 
+        }),
+      });
+      if (res.ok) {
+        setShowQuickAddModal(false);
+        setQuickAddSelection(null);
+        setQuickAddQuantity('');
+        setQuickAddCost('');
+        loadAllData();
+      } else {
+        alert('Error al registrar compra rápida.');
+      }
+    } catch (e) {
+      alert('Error de red.');
+    }
+  };
+
+  const handleSaveNewRawItem = async () => {
+    if (!newRawName || !newRawUnit) return;
+    try {
+      const newId = newRawName.toLowerCase().replace(/[^a-z0-9]/g, '_').substring(0, 20);
+      const res = await fetch(getApiUrl('/api/admin/raw-inventory/add-item'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          id: newId, 
+          name: newRawName, 
+          unit: newRawUnit,
+          stock: parseFloat(newRawStock) || 0,
+          cost: parseFloat(newRawCost) || 0
+        }),
+      });
+      if (res.ok) {
+        setShowNewRawItemModal(false);
+        setNewRawName('');
+        setNewRawUnit('g');
+        setNewRawStock('');
+        setNewRawCost('');
+        loadAllData();
+      } else {
+        alert('Error al crear insumo.');
       }
     } catch (e) {
       alert('Error de red.');
@@ -609,6 +685,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   <th>Costo Preparación (Calculado)</th>
                   <th>Precio Venta</th>
                   <th>Utilidad Bruta</th>
+                  <th>Receta</th>
                 </tr>
               </thead>
               <tbody>
@@ -622,11 +699,21 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       <td>
                         <div className="cost-input-wrapper">
                           <span>$</span>
-                          <input type="number" className="inventory-input-number" defaultValue={p.price} onBlur={(e) => handleUpdateProductPrice(p.id, parseFloat(e.target.value))} />
+                          <input type="number" id={`price-${p.id}`} className="inventory-input-number" defaultValue={p.price} />
+                          <button className="admin-submit-btn" style={{padding: '5px 10px', fontSize: '0.8rem', marginLeft: 10}} onClick={() => {
+                            const val = (document.getElementById(`price-${p.id}`) as HTMLInputElement).value;
+                            handleUpdateProductPrice(p.id, parseFloat(val));
+                          }}>Guardar</button>
                         </div>
                       </td>
                       <td className="font-bold" style={{ color: grossProfit > 0 ? '#10b981' : '#ef4444' }}>
                         ${grossProfit.toFixed(2)} MXN
+                      </td>
+                      <td>
+                        <button className="admin-submit-btn" style={{padding: '5px 10px', fontSize: '0.8rem', background: '#4b5563'}} onClick={() => {
+                          setEditingRecipeProduct(p);
+                          setEditingRecipe(p.recipe || {});
+                        }}>Ajustar Receta</button>
                       </td>
                     </tr>
                   );
@@ -639,50 +726,25 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
       {activeTab === 'raw_inventory' && (
         <div className="admin-inventory-container">
-          <h3 className="section-subtitle">INVENTARIO DE INSUMOS</h3>
-          <div className="inventory-table-wrapper">
-            <table className="inventory-table-admin">
-              <thead>
-                <tr>
-                  <th>Insumo</th>
-                  <th>Stock Actual</th>
-                  <th>Costo Total de Stock</th>
-                  <th>Costo Unitario</th>
-                  <th>Acciones Stock</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rawInventory.map((item) => {
-                  const unitCost = item.stock > 0 ? (item.cost / item.stock) : 0;
-                  return (
-                    <tr key={item.id} className={item.stock === 0 ? 'stock-depleted-row' : ''}>
-                      <td className="inventory-product-cell">
-                        <span className="font-bold">{item.name}</span>
-                      </td>
-                      <td>
-                        <div className="cost-input-wrapper">
-                          <input type="number" className="inventory-input-number" defaultValue={item.stock} onBlur={(e) => handleUpdateRawInventory(item.id, parseFloat(e.target.value), item.cost)} />
-                          <span>{item.unit}</span>
-                        </div>
-                      </td>
-                      <td>
-                        <div className="cost-input-wrapper">
-                          <span>$</span>
-                          <input type="number" className="inventory-input-number" defaultValue={item.cost} onBlur={(e) => handleUpdateRawInventory(item.id, item.stock, parseFloat(e.target.value))} />
-                        </div>
-                      </td>
-                      <td className="font-bold">${unitCost.toFixed(2)} MXN / {item.unit}</td>
-                      <td>
-                        <div className="inventory-actions-cell">
-                          <button className="stock-adjust-btn btn-stock-minus" onClick={() => handleUpdateRawInventory(item.id, Math.max(0, item.stock - 10), item.cost)}>-10</button>
-                          <button className="stock-adjust-btn btn-stock-plus" onClick={() => handleUpdateRawInventory(item.id, item.stock + 10, item.cost)}>+10</button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20}}>
+            <h3 className="section-subtitle" style={{margin: 0}}>INVENTARIO DE INSUMOS</h3>
+            <button className="admin-submit-btn" style={{width: 'auto', padding: '10px 20px'}} onClick={() => setShowNewRawItemModal(true)}>+ Crear Nuevo Insumo</button>
+          </div>
+          
+          <div className="quick-add-grid" style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 20}}>
+            {rawInventory.map(item => {
+              const unitCost = item.stock > 0 ? (item.cost / item.stock) : 0;
+              return (
+                <div key={item.id} className="raw-inventory-card" style={{
+                  background: '#2a1a1e', padding: 20, borderRadius: 12, border: '1px solid #ea580c', cursor: 'pointer', transition: 'all 0.2s', display: 'flex', flexDirection: 'column', alignItems: 'center'
+                }} onClick={() => { setQuickAddSelection(item); setShowQuickAddModal(true); }}>
+                  <div style={{fontSize: '2.5rem', marginBottom: 10}}>{item.name.match(/[\p{Emoji}\u200d]+/gu)?.[0] || '📦'}</div>
+                  <h4 style={{textAlign: 'center', marginBottom: 5, fontSize: '1.1rem'}}>{item.name.replace(/[\p{Emoji}\u200d]+/gu, '').trim()}</h4>
+                  <div style={{textAlign: 'center', color: '#ea580c', fontWeight: 'bold', fontSize: '1.2rem'}}>{item.stock} {item.unit}</div>
+                  <div style={{textAlign: 'center', color: '#888', fontSize: '0.9rem', marginTop: 5}}>${unitCost.toFixed(2)} MXN/{item.unit}</div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -761,6 +823,118 @@ export const AdminView: React.FC<AdminViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* MODALS */}
+      {editingRecipeProduct && (
+        <div className="checkout-modal-overlay" onClick={() => setEditingRecipeProduct(null)}>
+          <div className="checkout-modal-content" onClick={e => e.stopPropagation()} style={{maxWidth: 600}}>
+            <h2 style={{color: '#ea580c', marginBottom: 20}}>Receta: {editingRecipeProduct.name}</h2>
+            
+            <div style={{marginBottom: 20}}>
+              <h3 style={{marginBottom: 10}}>Ingredientes Actuales</h3>
+              {Object.entries(editingRecipe).map(([ingId, qty]) => {
+                const raw = rawInventory.find(r => r.id === ingId);
+                if (!raw) return null;
+                return (
+                  <div key={ingId} style={{display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10}}>
+                    <span style={{flex: 1}}>{raw.name}</span>
+                    <input type="number" className="admin-input-text" style={{width: 80}} value={qty} onChange={e => setEditingRecipe({...editingRecipe, [ingId]: parseFloat(e.target.value) || 0})} />
+                    <span>{raw.unit}</span>
+                    <button className="admin-submit-btn" style={{width: 'auto', background: '#ef4444'}} onClick={() => {
+                      const newR = {...editingRecipe};
+                      delete newR[ingId];
+                      setEditingRecipe(newR);
+                    }}>X</button>
+                  </div>
+                );
+              })}
+              {Object.keys(editingRecipe).length === 0 && <p style={{color: '#888'}}>No hay ingredientes.</p>}
+            </div>
+
+            <div style={{marginBottom: 20, padding: 15, background: '#1c1c1c', borderRadius: 8}}>
+              <h3 style={{marginBottom: 10}}>Añadir Ingrediente</h3>
+              <div style={{display: 'flex', gap: 10}}>
+                <select id="newIngSelect" className="admin-input-text" style={{flex: 1}}>
+                  <option value="">Selecciona un insumo...</option>
+                  {rawInventory.filter(r => !editingRecipe[r.id]).map(r => (
+                    <option key={r.id} value={r.id}>{r.name} ({r.unit})</option>
+                  ))}
+                </select>
+                <input type="number" id="newIngQty" className="admin-input-text" style={{width: 80}} placeholder="Cant." />
+                <button className="admin-submit-btn" style={{width: 'auto'}} onClick={() => {
+                  const sel = document.getElementById('newIngSelect') as HTMLSelectElement;
+                  const qty = document.getElementById('newIngQty') as HTMLInputElement;
+                  if (sel.value && qty.value) {
+                    setEditingRecipe({...editingRecipe, [sel.value]: parseFloat(qty.value)});
+                    sel.value = '';
+                    qty.value = '';
+                  }
+                }}>Añadir</button>
+              </div>
+            </div>
+
+            <div style={{display: 'flex', gap: 10, marginTop: 20}}>
+              <button className="checkout-btn" onClick={handleSaveRecipe}>Guardar Receta</button>
+              <button className="cancel-btn" onClick={() => setEditingRecipeProduct(null)}>Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showQuickAddModal && quickAddSelection && (
+        <div className="checkout-modal-overlay" onClick={() => setShowQuickAddModal(false)}>
+          <div className="checkout-modal-content" onClick={e => e.stopPropagation()}>
+            <h2 style={{color: '#ea580c', marginBottom: 20}}>Añadido Rápido: {quickAddSelection.name}</h2>
+            <div className="admin-form-group">
+              <label>Cantidad Comprada ({quickAddSelection.unit})</label>
+              <input type="number" className="admin-input-text" value={quickAddQuantity} onChange={e => setQuickAddQuantity(e.target.value)} placeholder={`Ej. 1000`} />
+            </div>
+            <div className="admin-form-group">
+              <label>Costo Total de la Compra ($ MXN)</label>
+              <input type="number" className="admin-input-text" value={quickAddCost} onChange={e => setQuickAddCost(e.target.value)} placeholder="Ej. 150" />
+            </div>
+            <p style={{fontSize: '0.9rem', color: '#aaa', marginBottom: 20}}>
+              Esto aumentará el stock y registrará automáticamente un egreso (gasto) en las finanzas de la cafetería.
+            </p>
+            <div style={{display: 'flex', gap: 10}}>
+              <button className="checkout-btn" onClick={handleSaveQuickAdd}>Registrar Compra</button>
+              <button className="cancel-btn" onClick={() => setShowQuickAddModal(false)}>Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showNewRawItemModal && (
+        <div className="checkout-modal-overlay" onClick={() => setShowNewRawItemModal(false)}>
+          <div className="checkout-modal-content" onClick={e => e.stopPropagation()}>
+            <h2 style={{color: '#ea580c', marginBottom: 20}}>Nuevo Insumo</h2>
+            <div className="admin-form-group">
+              <label>Nombre y Emoji (Ej. 🥛 Leche Entera)</label>
+              <input type="text" className="admin-input-text" value={newRawName} onChange={e => setNewRawName(e.target.value)} placeholder="☕️ Grano Espresso" />
+            </div>
+            <div className="admin-form-group">
+              <label>Unidad de Medida (Ej. g, ml, pza)</label>
+              <input type="text" className="admin-input-text" value={newRawUnit} onChange={e => setNewRawUnit(e.target.value)} placeholder="g" />
+            </div>
+            <div className="admin-form-group">
+              <label>Stock Inicial (Opcional)</label>
+              <input type="number" className="admin-input-text" value={newRawStock} onChange={e => setNewRawStock(e.target.value)} placeholder="0" />
+            </div>
+            <div className="admin-form-group">
+              <label>Costo Inicial ($ MXN) (Opcional)</label>
+              <input type="number" className="admin-input-text" value={newRawCost} onChange={e => setNewRawCost(e.target.value)} placeholder="0" />
+            </div>
+            <p style={{fontSize: '0.9rem', color: '#aaa', marginBottom: 20}}>
+              Si ingresas un Costo Inicial mayor a 0, se registrará como un egreso automático en el historial.
+            </p>
+            <div style={{display: 'flex', gap: 10}}>
+              <button className="checkout-btn" onClick={handleSaveNewRawItem}>Crear Insumo</button>
+              <button className="cancel-btn" onClick={() => setShowNewRawItemModal(false)}>Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

@@ -186,6 +186,17 @@ export class SupabaseDbAdapter implements DbAdapter {
     if (error) throw error;
   }
 
+  async createRawInventoryItem(item: import('./db').DbRawInventory): Promise<void> {
+    const { error } = await this.supabase.from('raw_inventory').insert({
+      id: item.id,
+      name: item.name,
+      unit: item.unit,
+      stock: item.stock,
+      cost: item.cost
+    });
+    if (error) throw error;
+  }
+
   async getProducts(): Promise<import('./db').DbProduct[]> {
     const { data, error } = await this.supabase.from('products').select('*');
     if (error) throw error;
@@ -204,6 +215,11 @@ export class SupabaseDbAdapter implements DbAdapter {
 
   async updateProductPrice(id: string, price: number): Promise<void> {
     const { error } = await this.supabase.from('products').update({ price }).eq('id', id);
+    if (error) throw error;
+  }
+
+  async updateProductRecipe(productId: string, recipe: Record<string, number>): Promise<void> {
+    const { error } = await this.supabase.from('products').update({ recipe }).eq('id', productId);
     if (error) throw error;
   }
 

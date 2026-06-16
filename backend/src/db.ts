@@ -81,8 +81,10 @@ export interface DbAdapter {
   
   getRawInventory(): Promise<DbRawInventory[]>;
   updateRawInventory(id: string, stock: number, cost: number): Promise<void>;
+  createRawInventoryItem(item: DbRawInventory): Promise<void>;
   getProducts(): Promise<DbProduct[]>;
   updateProductPrice(id: string, price: number): Promise<void>;
+  updateProductRecipe(productId: string, recipe: Record<string, number>): Promise<void>;
   getCashRegister(): Promise<Record<string, number>>;
   adjustCashRegister(denominations: Record<string, number>): Promise<void>;
   addCashTransaction(transaction: DbCashTransaction): Promise<void>;
@@ -229,14 +231,12 @@ class JsonDbAdapter implements DbAdapter {
     await this.save();
   }
 
-  async getRawInventory(): Promise<import('./db').DbRawInventory[]> {
-    return [];
-  }
+  async getRawInventory(): Promise<import('./db').DbRawInventory[]> { return []; }
   async updateRawInventory(id: string, stock: number, cost: number): Promise<void> {}
-  async getProducts(): Promise<import('./db').DbProduct[]> {
-    return [];
-  }
+  async createRawInventoryItem(item: import('./db').DbRawInventory): Promise<void> {}
+  async getProducts(): Promise<import('./db').DbProduct[]> { return []; }
   async updateProductPrice(id: string, price: number): Promise<void> {}
+  async updateProductRecipe(productId: string, recipe: Record<string, number>): Promise<void> {}
 
   async getCashRegister(): Promise<Record<string, number>> {
     await this.read();
@@ -529,10 +529,12 @@ class PostgresDbAdapter implements DbAdapter {
     return [];
   }
   async updateRawInventory(id: string, stock: number, cost: number): Promise<void> {}
+  async createRawInventoryItem(item: import('./db').DbRawInventory): Promise<void> {}
   async getProducts(): Promise<import('./db').DbProduct[]> {
     return [];
   }
   async updateProductPrice(id: string, price: number): Promise<void> {}
+  async updateProductRecipe(productId: string, recipe: Record<string, number>): Promise<void> {}
 
   async getCashRegister(): Promise<Record<string, number>> {
     const res = await this.client.query('SELECT * FROM cash_register');
