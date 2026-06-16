@@ -27,7 +27,7 @@ export interface CartItem {
   totalPrice: number;
 }
 
-export type OrderStatus = 'pending_payment' | 'pending_cash_payment' | 'paid' | 'preparing' | 'ready' | 'completed' | 'cancelled';
+export type OrderStatus = 'pending_payment' | 'pending_cash_payment' | 'paid' | 'preparing' | 'ready' | 'completed' | 'cancelled' | 'rejected';
 
 export interface Order {
   id: string;

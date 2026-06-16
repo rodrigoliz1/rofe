@@ -19,7 +19,7 @@ const PRODUCT_CATALOG: Product[] = [
     category: 'coffee',
     icon: 'espresso',
     customizable: true,
-    image: '/espresso.png'
+    image: '/espresso.png',
   },
   {
     id: 'double-espresso',
