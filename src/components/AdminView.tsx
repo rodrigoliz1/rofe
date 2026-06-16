@@ -64,6 +64,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
   onInventoryUpdate,
 }) => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'cash' | 'costs' | 'raw_inventory' | 'closure'>('dashboard');
+  const [isEditingMode, setIsEditingMode] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null | 'new'>(null);
   const [metrics, setMetrics] = useState<Metrics>({
     revenue: 0, costs: 0, profit: 0, cashInRegister: 0, transactionsCount: 0,
   });
@@ -122,6 +124,63 @@ export const AdminView: React.FC<AdminViewProps> = ({
                    ? `http://${window.location.hostname}:3000`
                    : window.location.origin);
     return `${base}${path}`;
+  };
+
+
+  const handleSaveProduct = async (p: Product, imgFile?: File) => {
+    try {
+      let finalImageUrl = p.image;
+      if (imgFile) {
+        const reader = new FileReader();
+        const base64Promise = new Promise<string>((resolve) => {
+          reader.onload = () => resolve((reader.result as string).split(',')[1]);
+        });
+        reader.readAsDataURL(imgFile);
+        const base64 = await base64Promise;
+
+        const uploadRes = await fetch(getApiUrl('/api/upload-image'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fileBase64: base64,
+            fileName: imgFile.name,
+            mimeType: imgFile.type
+          })
+        });
+        if (uploadRes.ok) {
+          const { url } = await uploadRes.json();
+          finalImageUrl = url;
+        }
+      }
+
+      const pToSave = { ...p, image: finalImageUrl };
+
+      const isNew = editingProduct === 'new';
+      const method = isNew ? 'POST' : 'PUT';
+      const endpoint = isNew ? '/api/products' : `/api/products/${p.id}`;
+
+      await fetch(getApiUrl(endpoint), {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(pToSave)
+      });
+      
+      setEditingProduct(null);
+      onInventoryUpdate(); // Reload products
+    } catch (e) {
+      console.error(e);
+      alert('Error guardando el producto');
+    }
+  };
+
+  const handleDeleteProduct = async (id: string) => {
+    try {
+      await fetch(getApiUrl(`/api/products/${id}`), { method: 'DELETE' });
+      setEditingProduct(null);
+      onInventoryUpdate();
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const loadAllData = async () => {
@@ -764,7 +823,20 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
       {activeTab === 'costs' && (
         <div className="admin-inventory-container">
-          <h3 className="section-subtitle">COSTOS Y PRECIOS DE PRODUCTOS</h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+            <h3 className="section-subtitle" style={{ margin: 0 }}>COSTOS Y PRECIOS DE PRODUCTOS</h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 15 }}>
+              {isEditingMode && (
+                <button className="checkout-btn" style={{ padding: '8px 15px', margin: 0, fontSize: '0.9rem' }} onClick={() => setEditingProduct('new')}>
+                  + Añadir Nuevo Producto
+                </button>
+              )}
+              <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', background: '#333', padding: '8px 15px', borderRadius: 20, color: '#fff', fontWeight: 'bold' }}>
+                Modo Edición
+                <input type="checkbox" checked={isEditingMode} onChange={e => setIsEditingMode(e.target.checked)} style={{ transform: 'scale(1.2)' }} />
+              </label>
+            </div>
+          </div>
           <div className="inventory-table-wrapper">
             <table className="inventory-table-admin">
               <thead>

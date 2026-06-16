@@ -31,10 +31,24 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
   const [quantity, setQuantity] = useState(1);
   const [totalPrice, setTotalPrice] = useState(product.price);
+  const [selectedCustomVariants, setSelectedCustomVariants] = useState<Record<string, string>>({});
 
   // Calculate pricing based on options selected
   useEffect(() => {
     let base = product.price;
+
+    // Custom Variants
+    if (product.custom_variants) {
+      product.custom_variants.forEach(group => {
+        const selectedOptName = selectedCustomVariants[group.title];
+        if (selectedOptName) {
+          const opt = group.options.find(o => o.name === selectedOptName);
+          if (opt && opt.priceModifier) {
+            base += opt.priceModifier;
+          }
+        }
+      });
+    }
 
     // Upgrades
     if (customization.size === 'grande') {

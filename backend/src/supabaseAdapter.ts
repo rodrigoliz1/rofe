@@ -369,4 +369,35 @@ export class SupabaseDbAdapter implements DbAdapter {
     if (error) throw error;
   }
 
+
+  async createProduct(product: import('./db').DbProduct): Promise<void> {
+    const { error } = await this.supabase.from('products').insert(product);
+    if (error) throw error;
+  }
+
+  async updateProduct(id: string, product: Partial<import('./db').DbProduct>): Promise<void> {
+    const { error } = await this.supabase.from('products').update(product).eq('id', id);
+    if (error) throw error;
+  }
+
+  async deleteProduct(id: string): Promise<void> {
+    const { error } = await this.supabase.from('products').delete().eq('id', id);
+    if (error) throw error;
+  }
+
+  async uploadProductImage(fileName: string, buffer: Buffer, mimeType: string): Promise<string> {
+    const path = `${Date.now()}_${fileName.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+    const { data, error } = await this.supabase.storage
+      .from('product_images')
+      .upload(path, buffer, { contentType: mimeType, upsert: true });
+    
+    if (error) throw error;
+
+    const { data: publicData } = this.supabase.storage
+      .from('product_images')
+      .getPublicUrl(path);
+      
+    return publicData.publicUrl;
+  }
+
 }

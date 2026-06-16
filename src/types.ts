@@ -1,3 +1,13 @@
+export interface CustomVariantOption {
+  name: string;
+  priceModifier: number;
+}
+
+export interface CustomVariantGroup {
+  title: string;
+  options: CustomVariantOption[];
+}
+
 export interface Product {
   id: string;
   name: string;
@@ -10,6 +20,7 @@ export interface Product {
   stock?: number; // Added for inventory management
   cost?: number; // Added for cost management
   recipe?: Record<string, number>; // Recipe logic
+  custom_variants?: CustomVariantGroup[];
 }
 
 export interface CustomizationOptions {
@@ -25,6 +36,7 @@ export interface CartItem {
   product: Product;
   quantity: number;
   customization: CustomizationOptions;
+  selectedCustomVariants?: Record<string, string>; // title -> optionName
   totalPrice: number;
 }
 

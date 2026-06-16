@@ -10,6 +10,16 @@ export interface DbRawInventory {
   cost: number; // cost per unit or total cost. Let's say cost is total cost for current stock to calculate unit cost: cost / stock.
 }
 
+export interface CustomVariantOption {
+  name: string;
+  priceModifier: number;
+}
+
+export interface CustomVariantGroup {
+  title: string;
+  options: CustomVariantOption[];
+}
+
 export interface DbProduct {
   id: string;
   name: string;
@@ -19,7 +29,8 @@ export interface DbProduct {
   icon: string;
   customizable: boolean;
   image: string;
-  recipe?: Record<string, number>; // e.g., { "coffee_beans": 25, "milk_whole": 280 }
+  recipe?: Record<string, number>;
+  custom_variants?: CustomVariantGroup[];
 }
 
 // Define DB structures
@@ -96,6 +107,10 @@ export interface DbAdapter {
   updateRawInventory(id: string, stock: number, cost: number): Promise<void>;
   createRawInventoryItem(item: DbRawInventory): Promise<void>;
   getProducts(): Promise<DbProduct[]>;
+  createProduct(product: DbProduct): Promise<void>;
+  updateProduct(id: string, product: Partial<DbProduct>): Promise<void>;
+  deleteProduct(id: string): Promise<void>;
+  uploadProductImage(fileName: string, buffer: Buffer, mimeType: string): Promise<string>;
   updateProductPrice(id: string, price: number): Promise<void>;
   updateProductRecipe(productId: string, recipe: Record<string, number>): Promise<void>;
   getCashRegister(): Promise<Record<string, number>>;
@@ -254,7 +269,11 @@ class JsonDbAdapter implements DbAdapter {
   async getRawInventory(): Promise<import('./db').DbRawInventory[]> { return []; }
   async updateRawInventory(id: string, stock: number, cost: number): Promise<void> {}
   async createRawInventoryItem(item: import('./db').DbRawInventory): Promise<void> {}
-  async getProducts(): Promise<import('./db').DbProduct[]> { return []; }
+  async getProducts(): Promise<DbProduct[]> { return []; }
+  async createProduct(product: DbProduct): Promise<void> {}
+  async updateProduct(id: string, product: Partial<DbProduct>): Promise<void> {}
+  async deleteProduct(id: string): Promise<void> {}
+  async uploadProductImage(f: string, b: Buffer, m: string): Promise<string> { return ''; }
   async updateProductPrice(id: string, price: number): Promise<void> {}
   async updateProductRecipe(productId: string, recipe: Record<string, number>): Promise<void> {}
 
@@ -562,9 +581,11 @@ class PostgresDbAdapter implements DbAdapter {
   }
   async updateRawInventory(id: string, stock: number, cost: number): Promise<void> {}
   async createRawInventoryItem(item: import('./db').DbRawInventory): Promise<void> {}
-  async getProducts(): Promise<import('./db').DbProduct[]> {
-    return [];
-  }
+  async getProducts(): Promise<DbProduct[]> { return []; }
+  async createProduct(product: DbProduct): Promise<void> {}
+  async updateProduct(id: string, product: Partial<DbProduct>): Promise<void> {}
+  async deleteProduct(id: string): Promise<void> {}
+  async uploadProductImage(f: string, b: Buffer, m: string): Promise<string> { return ''; }
   async updateProductPrice(id: string, price: number): Promise<void> {}
   async updateProductRecipe(productId: string, recipe: Record<string, number>): Promise<void> {}
 
