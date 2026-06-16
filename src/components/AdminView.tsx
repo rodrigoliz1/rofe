@@ -24,11 +24,7 @@ interface RawInventoryItem {
   cost: number;
 }
 
-interface InventoryDbItem {
-  product_id: string;
-  stock: number;
-  cost: number;
-}
+
 
 const DENOM_LABELS: Record<string, string> = {
   bill_1000: 'Billetes de $1000',

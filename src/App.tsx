@@ -54,14 +54,7 @@ function App() {
   };
 
   const loadInventory = async () => {
-    try {
-      const res = await fetch(getApiUrl('/api/admin/inventory'));
-      if (res.ok) {
-        setInventory(await res.json());
-      }
-    } catch (e) {
-      console.error('Error fetching inventory:', e);
-    }
+    // Inventory loading is now handled in AdminView
   };
 
   // Sync Manager: Periodically attempt to sync offline orders
@@ -193,7 +186,7 @@ function App() {
 
   const handleCheckout = () => setShowCheckout(true);
   const handleCancelOrder = () => setCart([]);
-  const handlePaymentSuccess = (orderId: string, customerName: string) => {
+  const handlePaymentSuccess = () => {
     setCart([]);
     setShowCheckout(false);
     setStarted(false);
@@ -257,7 +250,6 @@ function App() {
                 onSelectCategory={handleSelectCategory}
                 selectedCategory={selectedCategory}
                 onProductClick={handleProductClick}
-                inventory={inventory}
               />
               <Cart
                 cart={cart}
