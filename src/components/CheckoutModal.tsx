@@ -143,13 +143,21 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     }
 
     const currentOrder = orders.find((o) => o.id === orderId);
-    if (currentOrder && currentOrder.status === 'paid') {
-      setStep('processing');
-      const timer = setTimeout(() => {
-        setStep('success');
-        playSuccessSound();
-      }, 1200);
-      return () => clearTimeout(timer);
+    
+    if (currentOrder) {
+      // 1. Si el pago fue exitoso
+      if (currentOrder.status === 'paid') {
+        setStep('processing');
+        const timer = setTimeout(() => {
+          setStep('success');
+          playSuccessSound();
+        }, 1200);
+        return () => clearTimeout(timer);
+      } 
+      // 2. Si el pago falló (¡AQUÍ CONECTAMOS TU DISEÑO!)
+      else if (currentOrder.status === 'rejected') {
+        setStep('failed');
+      }
     }
   }, [orders, orderId, step]);
 

@@ -19,7 +19,7 @@ const PRODUCT_CATALOG: Product[] = [
     category: 'coffee',
     icon: 'espresso',
     customizable: true,
-    image: 'public/espresso.png'
+    image: '/espresso.png'
   },
   {
     id: 'double-espresso',
@@ -29,7 +29,7 @@ const PRODUCT_CATALOG: Product[] = [
     category: 'coffee',
     icon: 'double_espresso',
     customizable: true,
-    image: 'public/espresso.png',
+    image: '/espresso.png',
   },
   {
     id: 'americano',
@@ -39,7 +39,7 @@ const PRODUCT_CATALOG: Product[] = [
     category: 'coffee',
     icon: 'americano',
     customizable: true,
-    image: 'public/americano.webp',
+    image: '/americano.webp',
   },
   {
     id: 'latte',
@@ -69,7 +69,7 @@ const PRODUCT_CATALOG: Product[] = [
     category: 'coffee',
     icon: 'latte',
     customizable: true,
-    image: 'public/matcha-latte.jpg',
+    image: '/matcha-latte.jpg',
   },
   {
     id: 'cold-brew',
@@ -79,7 +79,7 @@ const PRODUCT_CATALOG: Product[] = [
     category: 'cold',
     icon: 'cold_brew',
     customizable: true,
-    image: 'public/cold-brew.webp',
+    image: '/cold-brew.webp',
   },
   {
     id: 'iced-latte',
@@ -89,7 +89,7 @@ const PRODUCT_CATALOG: Product[] = [
     category: 'cold',
     icon: 'cold_brew',
     customizable: true,
-    image: 'public/iced-latte.webp',
+    image: '/iced-latte.webp',
   },
   {
     id: 'iced-matcha-latte',
@@ -99,7 +99,7 @@ const PRODUCT_CATALOG: Product[] = [
     category: 'cold',
     icon: 'cold_brew',
     customizable: true,
-    image: 'public/matcha-frio.jpg',
+    image: '/matcha-frio.jpg',
   },
   {
     id: 'croissant-mantequilla',
@@ -119,7 +119,7 @@ const PRODUCT_CATALOG: Product[] = [
     category: 'bakery',
     icon: 'pain_choc',
     customizable: true,
-    image: 'public/pan-chocolate.jpg',
+    image: '/pan-chocolate.jpg',
   },
   {
     id: 'galleta-chocolate',
@@ -129,7 +129,7 @@ const PRODUCT_CATALOG: Product[] = [
     category: 'bakery',
     icon: 'pain_choc',
     customizable: true,
-    image: 'public/galleta-chispas.jpeg',
+    image: '/galleta-chispas.jpeg',
   },
 ];
 
@@ -246,13 +246,7 @@ function App() {
           console.log('Se limpiaron todos los pedidos via SSE.');
           setOrders([]);
           localStorage.removeItem('motocarro_orders');
-        } else if (data.type === 'payment_rejected') {
-          // 👇 ESTA ES LA PARTE NUEVA PARA ESCUCHAR EL RECHAZO 👇
-          console.log('Pago rechazado via SSE para orden:', data.orderId);
-          alert('❌ El pago fue rechazado o cancelado en la terminal. Intente con otra tarjeta.');
-          // Si quisieras que el carrito se cierre solo, descomenta la línea de abajo:
-          // setShowCheckout(false); 
-        }
+        } 
       } catch (e) {
         console.error('Error parsing SSE event:', e);
       }

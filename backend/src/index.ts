@@ -303,11 +303,24 @@ app.post('/api/webhooks/mercadopago', async (req, res) => {
       }
       else if (pointState === 'CANCELED' || pointState === 'ERROR' || paymentState === 'rejected') {
         console.log(`⚠️ Pago físico rechazado/cancelado para pedido: ${orderId}`);
-        // Disparamos un evento de rechazo a la web
-        broadcast({
-          type: 'payment_rejected',
-          orderId: orderId
-        });
+        
+        const orders = await db.getOrders();
+        const orderIndex = orders.findIndex((o) => o.id === orderId);
+        
+        if (orderIndex > -1) {
+          // 1. Actualizamos el estado a 'rejected' (o 'failed' si así lo llamaste en CheckoutModal)
+          await db.updateOrderStatus(orderId, 'rejected'); 
+          
+          const updatedOrders = await db.getOrders();
+          const rejectedOrder = updatedOrders.find(o => o.id === orderId);
+
+          // 2. Disparamos la actualización normal para que tu CheckoutModal reaccione
+          broadcast({
+            type: 'order_updated',
+            orderId: orderId,
+            order: rejectedOrder
+          });
+        }
       }
     } 
     // --- ESCENARIO 2: Pago tradicional / Fallback ---
