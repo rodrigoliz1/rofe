@@ -25,7 +25,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onAdminCl
       )}
 
       <div className="welcome-content">
-        <h1 className="brand-logo">ROFE<span className="accent-dot">.</span></h1>
+        <h1 className="brand-logo">ROFÉ<span className="accent-dot">.</span></h1>
         <p className="brand-subtitle">ESPRESSO BAR</p>
 
         <div className="pulse-container">
