@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Product, CustomVariantGroup, CustomVariantOption } from '../types';
+import type { Product, CustomVariantGroup } from '../types';
 
 interface RawInventoryItem {
   id: string;

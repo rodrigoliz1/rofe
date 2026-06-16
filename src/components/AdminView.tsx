@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import type { Product, Order } from '../types';
+import { ProductEditorModal } from './ProductEditorModal';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 
 interface AdminViewProps {
@@ -1284,6 +1285,17 @@ export const AdminView: React.FC<AdminViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+
+      {editingProduct && (
+        <ProductEditorModal 
+          product={editingProduct === 'new' ? undefined : editingProduct} 
+          rawInventory={rawInventory}
+          onSave={handleSaveProduct}
+          onClose={() => setEditingProduct(null)}
+          onDelete={handleDeleteProduct}
+        />
       )}
 
     </div>
