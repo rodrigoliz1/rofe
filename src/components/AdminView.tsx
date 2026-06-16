@@ -97,9 +97,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [editingRecipeProduct, setEditingRecipeProduct] = useState<Product | null>(null);
   const [editingRecipe, setEditingRecipe] = useState<Record<string, number>>({});
   
-  const [showQuickAddModal, setShowQuickAddModal] = useState(false);
+  
   const [showRawItemDetailModal, setShowRawItemDetailModal] = useState(false);
-  const [showManualAdjustModal, setShowManualAdjustModal] = useState(false);
+  const [rawModalView, setRawModalView] = useState<'details' | 'quickAdd' | 'manualAdjust'>('details');
+  
   const [quickAddSelection, setQuickAddSelection] = useState<RawInventoryItem | null>(null);
   const [quickAddQuantity, setQuickAddQuantity] = useState('');
   const [quickAddCost, setQuickAddCost] = useState('');
@@ -113,7 +114,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   // Daily Closure state
   const [closureStats, setClosureStats] = useState<any>(null);
   const [closureHistory, setClosureHistory] = useState<any[]>([]);
-  const [cashLeftInRegister, setCashLeftInRegister] = useState('');
+  const [closureDenominations, setClosureDenominations] = useState<Record<string, number>>({});
 
   const getApiUrl = (path: string) => {
     const base = import.meta.env.VITE_API_URL || 
@@ -184,6 +185,13 @@ export const AdminView: React.FC<AdminViewProps> = ({
   useEffect(() => {
     loadAllData();
   }, [activeTab, viewMode, datePreset, customStartDate, customEndDate]);
+
+  const handleAdjustClosureDenom = (denom: string, val: number) => {
+    setClosureDenominations(prev => ({
+      ...prev,
+      [denom]: Math.max(0, (prev[denom] || 0) + val)
+    }));
+  };
 
   const handleAdjustDenom = (denom: string, val: number) => {
     setAdjustedRegister(prev => ({
@@ -335,23 +343,30 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
   const handleExecuteClosure = async () => {
     if (!closureStats) return;
-    const finalCash = parseFloat(cashLeftInRegister);
-    if (isNaN(finalCash)) {
-      alert('Por favor ingresa cuánto efectivo dejarás en caja (Fondo de Caja).');
-      return;
-    }
+    
+    // Calculate total cash from denominations
+    let finalCash = 0;
+    const DENOM_VALUES: Record<string, number> = {
+      bill_1000: 1000, bill_500: 500, bill_200: 200, bill_100: 100, bill_50: 50, bill_20: 20,
+      coin_20: 20, coin_10: 10, coin_5: 5, coin_2: 2, coin_1: 1, coin_0_50: 0.5, coin_0_20: 0.2
+    };
+    Object.entries(closureDenominations).forEach(([d, q]) => {
+      finalCash += q * (DENOM_VALUES[d] || 0);
+    });
+
     try {
       const res = await fetch(getApiUrl('/api/admin/closures'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...closureStats,
-          cash_end: finalCash
+          cash_end: finalCash,
+          denominations_left: closureDenominations
         })
       });
       if (res.ok) {
         alert('Corte de caja registrado con éxito. Empieza una nueva jornada.');
-        setCashLeftInRegister('');
+        setClosureDenominations({});
         loadAllData();
       } else alert('Error al registrar cierre.');
     } catch (e) {
@@ -371,7 +386,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
         body: JSON.stringify({ id: quickAddSelection.id, stock: s, cost: c }),
       });
       if (res.ok) {
-        setShowManualAdjustModal(false);
+        setShowRawItemDetailModal(false);
         loadAllData();
       } else alert('Error al guardar ajuste.');
     } catch (e) { alert('Error de red.'); }
@@ -390,7 +405,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
         }),
       });
       if (res.ok) {
-        setShowQuickAddModal(false);
+        setShowRawItemDetailModal(false);
         setQuickAddSelection(null);
         setQuickAddQuantity('');
         setQuickAddCost('');
@@ -444,6 +459,18 @@ export const AdminView: React.FC<AdminViewProps> = ({
       }
     }
     return totalCost;
+  };
+
+  const calculateMaxProduction = (product: Product): number | null => {
+    if (!product.recipe || Object.keys(product.recipe).length === 0) return null; // Infinito o N/A
+    let minProduction = Infinity;
+    for (const [ingId, qty] of Object.entries(product.recipe)) {
+      const raw = rawInventory.find(r => r.id === ingId);
+      const stock = raw ? raw.stock : 0;
+      const possible = Math.floor(stock / Number(qty));
+      if (possible < minProduction) minProduction = possible;
+    }
+    return minProduction;
   };
 
   // Build chart data
@@ -743,6 +770,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
               <thead>
                 <tr>
                   <th>Producto</th>
+                  <th>Stock Posible</th>
                   <th>Costo Preparación (Calculado)</th>
                   <th>Precio Venta</th>
                   <th>Utilidad Bruta</th>
@@ -752,10 +780,14 @@ export const AdminView: React.FC<AdminViewProps> = ({
               <tbody>
                 {products.map((p) => {
                   const prepCost = calculateProductCost(p);
+                  const maxProd = calculateMaxProduction(p);
                   const grossProfit = p.price - prepCost;
                   return (
                     <tr key={p.id}>
                       <td className="inventory-product-cell font-bold">{p.name}</td>
+                      <td style={{ color: maxProd !== null && maxProd < 10 ? '#f43f5e' : '#10b981', fontWeight: 'bold' }}>
+                        {maxProd !== null ? `${maxProd} un.` : 'N/A'}
+                      </td>
                       <td>${prepCost.toFixed(2)} MXN</td>
                       <td>
                         <div className="cost-input-wrapper">
@@ -802,6 +834,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   setQuickAddSelection(item); 
                   setQuickAddQuantity(item.stock.toString());
                   setQuickAddCost(item.cost.toString());
+                  setRawModalView('details');
                   setShowRawItemDetailModal(true); 
                 }}>
                   <div style={{fontSize: '2.5rem', marginBottom: 10}}>{item.name.match(/[\p{Emoji}\u200d]+/gu)?.[0] || '📦'}</div>
@@ -842,14 +875,63 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: 20, alignItems: 'center', background: '#1c1c1c', padding: 20, borderRadius: 12 }}>
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', marginBottom: 10, color: '#fff', fontWeight: 'bold' }}>¿Cuánto Efectivo dejarás en la Caja como fondo para la siguiente jornada?</label>
-                  <input type="number" className="admin-input-text" value={cashLeftInRegister} onChange={e => setCashLeftInRegister(e.target.value)} placeholder="Ej. 500" style={{ width: '100%', maxWidth: 300 }} />
+              <div style={{ background: '#1c1c1c', padding: 20, borderRadius: 12 }}>
+                <h4 style={{ color: '#fff', marginBottom: 15, borderBottom: '1px solid #333', paddingBottom: 10 }}>¿Qué denominaciones dejarás como Fondo de Caja para mañana?</h4>
+                <div className="cash-adjust-grid" style={{ marginBottom: 20 }}>
+                  <div className="cash-adjust-column">
+                    <h5 className="column-subtitle" style={{marginBottom: 10, color: '#888'}}>💵 BILLETES</h5>
+                    <div className="cash-adjust-list">
+                      {Object.keys(DENOM_LABELS).filter(k => k.includes('bill')).map(denom => {
+                        const currentVal = (closureDenominations[denom] || 0) * DENOM_VALUES[denom];
+                        return (
+                          <div key={denom} className="cash-adjust-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                            <span className="cash-adjust-label" style={{ width: 80 }}>{DENOM_LABELS[denom]}</span>
+                            <div className="cash-adjust-controls" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                              <button className="cash-qty-btn" onClick={() => handleAdjustClosureDenom(denom, -5)}>-5</button>
+                              <button className="cash-qty-btn" onClick={() => handleAdjustClosureDenom(denom, -1)}>-</button>
+                              <span className="cash-qty-value" style={{ width: 30, textAlign: 'center', fontWeight: 'bold' }}>{closureDenominations[denom] || 0}</span>
+                              <button className="cash-qty-btn" onClick={() => handleAdjustClosureDenom(denom, 1)}>+</button>
+                              <button className="cash-qty-btn" onClick={() => handleAdjustClosureDenom(denom, 5)}>+5</button>
+                              <span className="cash-value-display" style={{ width: 60, textAlign: 'right', color: '#10b981' }}>${currentVal.toFixed(2)}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="cash-adjust-column">
+                    <h5 className="column-subtitle" style={{marginBottom: 10, color: '#888'}}>🪙 MONEDAS</h5>
+                    <div className="cash-adjust-list">
+                      {Object.keys(DENOM_LABELS).filter(k => k.includes('coin')).map(denom => {
+                        const currentVal = (closureDenominations[denom] || 0) * DENOM_VALUES[denom];
+                        return (
+                          <div key={denom} className="cash-adjust-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                            <span className="cash-adjust-label" style={{ width: 80 }}>{DENOM_LABELS[denom]}</span>
+                            <div className="cash-adjust-controls" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                              <button className="cash-qty-btn" onClick={() => handleAdjustClosureDenom(denom, -5)}>-5</button>
+                              <button className="cash-qty-btn" onClick={() => handleAdjustClosureDenom(denom, -1)}>-</button>
+                              <span className="cash-qty-value" style={{ width: 30, textAlign: 'center', fontWeight: 'bold' }}>{closureDenominations[denom] || 0}</span>
+                              <button className="cash-qty-btn" onClick={() => handleAdjustClosureDenom(denom, 1)}>+</button>
+                              <button className="cash-qty-btn" onClick={() => handleAdjustClosureDenom(denom, 5)}>+5</button>
+                              <span className="cash-value-display" style={{ width: 60, textAlign: 'right', color: '#10b981' }}>${currentVal.toFixed(2)}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
-                <button className="checkout-btn" onClick={handleExecuteClosure} style={{ padding: '15px 30px', fontSize: '1.1rem' }}>
-                  🔒 Ejecutar Cierre de Caja
-                </button>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #333', paddingTop: 20 }}>
+                  <div>
+                    <span style={{ color: '#888', fontSize: '0.9rem' }}>Fondo de Caja Total Calculado:</span>
+                    <h3 style={{ margin: 0, color: '#fff', fontSize: '1.8rem' }}>
+                      ${Object.entries(closureDenominations).reduce((sum, [d, qty]) => sum + (qty * (DENOM_VALUES[d] || 0)), 0).toFixed(2)} MXN
+                    </h3>
+                  </div>
+                  <button className="checkout-btn" onClick={handleExecuteClosure} style={{ padding: '15px 30px', fontSize: '1.1rem' }}>
+                    🔒 Ejecutar Cierre de Caja y Sincronizar
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -1012,87 +1094,91 @@ export const AdminView: React.FC<AdminViewProps> = ({
         </div>
       )}
 
-      {showRawItemDetailModal && quickAddSelection && (
-        <div className="checkout-modal-overlay" onClick={() => setShowRawItemDetailModal(false)}>
-          <div className="checkout-modal-content" onClick={e => e.stopPropagation()} style={{textAlign: 'center', maxWidth: 450}}>
-            <div style={{fontSize: '4rem', marginBottom: 10}}>{quickAddSelection.name.match(/[\p{Emoji}\u200d]+/gu)?.[0] || '📦'}</div>
-            <h2 style={{color: '#fff', marginBottom: 20, fontSize: '1.8rem'}}>{quickAddSelection.name.replace(/[\p{Emoji}\u200d]+/gu, '').trim()}</h2>
-            
-            <div style={{background: '#1c1c1c', borderRadius: 12, padding: 20, marginBottom: 20}}>
-              <p style={{fontSize: '1rem', color: '#888', marginBottom: 5}}>Stock Disponible</p>
-              <h3 style={{fontSize: '2rem', color: '#ea580c', margin: 0}}>{quickAddSelection.stock} <span style={{fontSize: '1rem'}}>{quickAddSelection.unit}</span></h3>
-              <div style={{marginTop: 15, paddingTop: 15, borderTop: '1px solid #333', display: 'flex', justifyContent: 'space-between'}}>
-                <div>
-                  <p style={{fontSize: '0.8rem', color: '#888', margin: 0}}>Costo Total</p>
-                  <p style={{fontWeight: 'bold', margin: 0}}>${quickAddSelection.cost.toFixed(2)}</p>
+            {showRawItemDetailModal && quickAddSelection && (
+        <div className="checkout-modal-overlay" style={{ backdropFilter: 'blur(5px)' }} onClick={() => setShowRawItemDetailModal(false)}>
+          <div className="checkout-modal-content" onClick={e => e.stopPropagation()} style={{textAlign: 'center', maxWidth: 450, position: 'relative'}}>
+            <button 
+              onClick={() => setShowRawItemDetailModal(false)}
+              style={{position: 'absolute', top: 15, right: 15, background: 'transparent', border: 'none', color: '#888', fontSize: '1.5rem', cursor: 'pointer'}}
+            >✕</button>
+
+            {rawModalView === 'details' && (
+              <>
+                <div style={{fontSize: '4rem', marginBottom: 10}}>{quickAddSelection.name.match(/[\p{Emoji}\u200d]+/gu)?.[0] || '📦'}</div>
+                <h2 style={{color: '#fff', marginBottom: 20, fontSize: '1.8rem'}}>{quickAddSelection.name.replace(/[\p{Emoji}\u200d]+/gu, '').trim()}</h2>
+                
+                <div style={{background: '#1c1c1c', borderRadius: 12, padding: 20, marginBottom: 20}}>
+                  <p style={{fontSize: '1rem', color: '#888', marginBottom: 5}}>Stock Disponible</p>
+                  <h3 style={{fontSize: '2rem', color: '#ea580c', margin: 0}}>{quickAddSelection.stock} <span style={{fontSize: '1rem'}}>{quickAddSelection.unit}</span></h3>
+                  <div style={{marginTop: 15, paddingTop: 15, borderTop: '1px solid #333', display: 'flex', justifyContent: 'space-between'}}>
+                    <div>
+                      <p style={{fontSize: '0.8rem', color: '#888', margin: 0}}>Costo Total</p>
+                      <p style={{fontWeight: 'bold', margin: 0}}>${quickAddSelection.cost.toFixed(2)}</p>
+                    </div>
+                    <div>
+                      <p style={{fontSize: '0.8rem', color: '#888', margin: 0}}>Costo Unitario</p>
+                      <p style={{fontWeight: 'bold', margin: 0}}>${(quickAddSelection.stock > 0 ? quickAddSelection.cost / quickAddSelection.stock : 0).toFixed(2)}</p>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <p style={{fontSize: '0.8rem', color: '#888', margin: 0}}>Costo Unitario</p>
-                  <p style={{fontWeight: 'bold', margin: 0}}>${(quickAddSelection.stock > 0 ? quickAddSelection.cost / quickAddSelection.stock : 0).toFixed(2)}</p>
+
+                <div style={{display: 'flex', flexDirection: 'column', gap: 10}}>
+                  <button className="checkout-btn" onClick={() => {
+                    setQuickAddQuantity('');
+                    setQuickAddCost('');
+                    setRawModalView('quickAdd');
+                  }}>+ Registrar Compra / Recarga</button>
+                  <button className="admin-submit-btn" style={{background: '#4b5563'}} onClick={() => {
+                    setQuickAddQuantity(quickAddSelection.stock.toString());
+                    setQuickAddCost(quickAddSelection.cost.toString());
+                    setRawModalView('manualAdjust');
+                  }}>⚙️ Ajuste Manual de Inventario</button>
                 </div>
-              </div>
-            </div>
+              </>
+            )}
 
-            <div style={{display: 'flex', flexDirection: 'column', gap: 10}}>
-              <button className="checkout-btn" onClick={() => {
-                setQuickAddQuantity('');
-                setQuickAddCost('');
-                setShowRawItemDetailModal(false);
-                setShowQuickAddModal(true);
-              }}>+ Registrar Compra / Recarga</button>
-              <button className="admin-submit-btn" style={{background: '#4b5563'}} onClick={() => {
-                setQuickAddQuantity(quickAddSelection.stock.toString());
-                setQuickAddCost(quickAddSelection.cost.toString());
-                setShowRawItemDetailModal(false);
-                setShowManualAdjustModal(true);
-              }}>⚙️ Ajuste Manual de Inventario</button>
-            </div>
-          </div>
-        </div>
-      )}
+            {rawModalView === 'quickAdd' && (
+              <>
+                <h2 style={{color: '#ea580c', marginBottom: 20}}>Registrar Compra: {quickAddSelection.name}</h2>
+                <div className="admin-form-group" style={{textAlign: 'left'}}>
+                  <label>Cantidad Comprada ({quickAddSelection.unit})</label>
+                  <input type="number" className="admin-input-text" value={quickAddQuantity} onChange={e => setQuickAddQuantity(e.target.value)} placeholder={`Ej. 1000`} />
+                </div>
+                <div className="admin-form-group" style={{textAlign: 'left'}}>
+                  <label>Costo Total de la Compra ($ MXN)</label>
+                  <input type="number" className="admin-input-text" value={quickAddCost} onChange={e => setQuickAddCost(e.target.value)} placeholder="Ej. 150" />
+                </div>
+                <p style={{fontSize: '0.9rem', color: '#aaa', marginBottom: 20, textAlign: 'left'}}>
+                  Esto aumentará el stock y registrará automáticamente un egreso (gasto) en las finanzas de la cafetería.
+                </p>
+                <div style={{display: 'flex', gap: 10}}>
+                  <button className="checkout-btn" onClick={handleSaveQuickAdd}>Registrar Compra</button>
+                  <button className="cancel-btn" onClick={() => setRawModalView('details')}>Atrás</button>
+                </div>
+              </>
+            )}
 
-      {showManualAdjustModal && quickAddSelection && (
-        <div className="checkout-modal-overlay" onClick={() => setShowManualAdjustModal(false)}>
-          <div className="checkout-modal-content" onClick={e => e.stopPropagation()}>
-            <h2 style={{color: '#ea580c', marginBottom: 20}}>Ajuste Manual: {quickAddSelection.name}</h2>
-            <div className="admin-form-group">
-              <label>Stock Físico Real ({quickAddSelection.unit})</label>
-              <input type="number" className="admin-input-text" value={quickAddQuantity} onChange={e => setQuickAddQuantity(e.target.value)} />
-            </div>
-            <div className="admin-form-group">
-              <label>Costo Total del Stock ($ MXN)</label>
-              <input type="number" className="admin-input-text" value={quickAddCost} onChange={e => setQuickAddCost(e.target.value)} />
-            </div>
-            <p style={{fontSize: '0.9rem', color: '#aaa', marginBottom: 20}}>
-              Utiliza esta opción para corregir mermas, desperdicios o errores. **No se registrará ningún egreso financiero.**
-            </p>
-            <div style={{display: 'flex', gap: 10}}>
-              <button className="checkout-btn" onClick={handleSaveManualAdjust}>Guardar Ajuste</button>
-              <button className="cancel-btn" onClick={() => setShowManualAdjustModal(false)}>Cancelar</button>
-            </div>
-          </div>
-        </div>
-      )}
+            {rawModalView === 'manualAdjust' && (
+              <>
+                <h2 style={{color: '#ea580c', marginBottom: 20}}>Ajuste Manual: {quickAddSelection.name}</h2>
+                <div className="admin-form-group" style={{textAlign: 'left'}}>
+                  <label>Stock Físico Real ({quickAddSelection.unit})</label>
+                  <input type="number" className="admin-input-text" value={quickAddQuantity} onChange={e => setQuickAddQuantity(e.target.value)} />
+                </div>
+                <div className="admin-form-group" style={{textAlign: 'left'}}>
+                  <label>Costo Total del Stock ($ MXN)</label>
+                  <input type="number" className="admin-input-text" value={quickAddCost} onChange={e => setQuickAddCost(e.target.value)} />
+                </div>
+                <p style={{fontSize: '0.9rem', color: '#aaa', marginBottom: 20, textAlign: 'left'}}>
+                  Utiliza esta opción para corregir mermas, desperdicios o errores. **No se registrará ningún egreso financiero.**
+                </p>
+                <div style={{display: 'flex', gap: 10}}>
+                  <button className="checkout-btn" onClick={handleSaveManualAdjust}>Guardar Ajuste</button>
+                  <button className="cancel-btn" onClick={() => setRawModalView('details')}>Atrás</button>
+                </div>
+              </>
+            )}
 
-      {showQuickAddModal && quickAddSelection && (
-        <div className="checkout-modal-overlay" onClick={() => setShowQuickAddModal(false)}>
-          <div className="checkout-modal-content" onClick={e => e.stopPropagation()}>
-            <h2 style={{color: '#ea580c', marginBottom: 20}}>Registrar Compra: {quickAddSelection.name}</h2>
-            <div className="admin-form-group">
-              <label>Cantidad Comprada ({quickAddSelection.unit})</label>
-              <input type="number" className="admin-input-text" value={quickAddQuantity} onChange={e => setQuickAddQuantity(e.target.value)} placeholder={`Ej. 1000`} />
-            </div>
-            <div className="admin-form-group">
-              <label>Costo Total de la Compra ($ MXN)</label>
-              <input type="number" className="admin-input-text" value={quickAddCost} onChange={e => setQuickAddCost(e.target.value)} placeholder="Ej. 150" />
-            </div>
-            <p style={{fontSize: '0.9rem', color: '#aaa', marginBottom: 20}}>
-              Esto aumentará el stock y registrará automáticamente un egreso (gasto) en las finanzas de la cafetería.
-            </p>
-            <div style={{display: 'flex', gap: 10}}>
-              <button className="checkout-btn" onClick={handleSaveQuickAdd}>Registrar Compra</button>
-              <button className="cancel-btn" onClick={() => setShowQuickAddModal(false)}>Cancelar</button>
-            </div>
           </div>
         </div>
       )}

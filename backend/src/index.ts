@@ -931,8 +931,16 @@ app.get('/api/admin/closures/stats', async (req, res) => {
 app.post('/api/admin/closures', async (req, res) => {
   try {
     const closureData = req.body;
+    const denomsLeft = closureData.denominations_left;
+    delete closureData.denominations_left;
+
     closureData.closed_at = new Date().toISOString();
     await db.createDailyClosure(closureData);
+
+    if (denomsLeft) {
+      await db.adjustCashRegister(denomsLeft);
+    }
+
     res.json({ message: 'Corte de caja registrado exitosamente.' });
   } catch (error) {
     res.status(500).json({ error: 'Error al registrar corte de caja.' });
