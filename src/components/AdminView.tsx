@@ -24,13 +24,6 @@ interface RawInventoryItem {
   cost: number;
 }
 
-// Se mantiene por si se expande a futuro en la base de datos
-interface InventoryDbItem {
-  product_id: string;
-  stock: number;
-  cost: number;
-}
-
 const DENOM_LABELS: Record<string, string> = {
   bill_1000: 'Billetes de $1000',
   bill_500: 'Billetes de $500',
@@ -76,7 +69,6 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [rawInventory, setRawInventory] = useState<RawInventoryItem[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
   
-  // CORREGIDO: Se añade el guion bajo para evitar el error de variable no usada
   const [_orders, setOrders] = useState<Order[]>([]);
   const [bakeryBatches, setBakeryBatches] = useState<any[]>([]);
 
@@ -224,7 +216,6 @@ export const AdminView: React.FC<AdminViewProps> = ({
         setTxError(err.error || 'Error al registrar movimiento.');
       }
     } catch (_error) {
-      // CORREGIDO: Se añadió _error para las excepciones no utilizadas
       setTxError('Error al conectar con el servidor.');
     }
   };
@@ -265,7 +256,6 @@ export const AdminView: React.FC<AdminViewProps> = ({
         alert('Error al auditar.');
       }
     } catch (_e) {
-      // CORREGIDO: Se añadió _e
       alert('Error de conexión.');
     }
   };
@@ -284,7 +274,6 @@ export const AdminView: React.FC<AdminViewProps> = ({
         alert('Error al actualizar precio.');
       }
     } catch (_e) {
-      // CORREGIDO: Se añadió _e
       alert('Error de red.');
     }
   };
@@ -302,7 +291,6 @@ export const AdminView: React.FC<AdminViewProps> = ({
         alert('Error al actualizar insumo.');
       }
     } catch (_e) {
-      // CORREGIDO: Se añadió _e
       alert('Error de red.');
     }
   };
