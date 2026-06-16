@@ -272,7 +272,36 @@ export const BaristaView: React.FC<BaristaViewProps> = ({
       }
     } catch (e) {
       console.error(e);
-      alert('Error de red al confirmar pago.');
+      // Offline fallback
+      const offlineQueueStr = localStorage.getItem('motocarro_offline_sync');
+      if (offlineQueueStr) {
+        let offlineQueue = JSON.parse(offlineQueueStr);
+        const index = offlineQueue.findIndex((q: any) => q.order.id === selectedOrder.id);
+        if (index > -1) {
+          offlineQueue[index].order.status = 'paid';
+          offlineQueue[index].isPendingPayment = false;
+          offlineQueue[index].cashTransaction = {
+            type: 'payment',
+            amount: receivedAmount,
+            description: `Pago en efectivo recibido para orden ${selectedOrder.id}`,
+            denominations: receivedDenoms
+          };
+          if (changeDue > 0) {
+            offlineQueue[index].changeTransaction = {
+              type: 'change',
+              amount: changeDue,
+              description: `Cambio devuelto para orden ${selectedOrder.id}`,
+              denominations: changeOptimalResult.changeBreakdown
+            };
+          }
+          localStorage.setItem('motocarro_offline_sync', JSON.stringify(offlineQueue));
+        }
+      }
+      
+      // Update local state directly so barista can continue working
+      onUpdateOrderStatus(selectedOrder.id, 'paid');
+      setSelectedOrder(null);
+      setReceivedDenoms({});
     }
   };
 

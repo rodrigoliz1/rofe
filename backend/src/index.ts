@@ -179,6 +179,47 @@ app.post('/api/orders', async (req, res) => {
   }
 });
 
+// Sync offline orders
+app.post('/api/orders/sync', async (req, res) => {
+  try {
+    const { syncData } = req.body;
+    if (!Array.isArray(syncData)) {
+      res.status(400).json({ error: 'Payload de sincronización inválido.' });
+      return;
+    }
+
+    let syncedCount = 0;
+    for (const record of syncData) {
+      const { order, cashTransaction, changeTransaction } = record;
+      if (order) {
+        try {
+          await db.createOrder(order);
+          syncedCount++;
+          if (cashTransaction) {
+            await db.addCashTransaction(cashTransaction);
+          }
+          if (changeTransaction) {
+            await db.addCashTransaction(changeTransaction);
+          }
+        } catch (e: any) {
+          // If the order already exists, it might throw a duplicate key error. We can ignore it or log it.
+          console.warn(`Error al sincronizar orden ${order.id}:`, e.message);
+        }
+      }
+    }
+
+    // Broadcast update so clients refresh
+    if (syncedCount > 0) {
+      broadcast({ type: 'inventory_updated' });
+    }
+
+    res.json({ message: 'Sincronización completada', syncedOrders: syncedCount });
+  } catch (error) {
+    console.error('Error en sync:', error);
+    res.status(500).json({ error: 'Error interno durante sincronización.' });
+  }
+});
+
 // Update order status (Barista View actions)
 app.post('/api/orders/:id/status', async (req, res) => {
   try {

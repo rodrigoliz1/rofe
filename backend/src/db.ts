@@ -34,6 +34,8 @@ export interface DbBakeryBatch {
   expires_at: string;
 }
 
+import { SupabaseDbAdapter } from './supabaseAdapter';
+
 // Order structures match our existing types
 export interface DbOrder {
   id: string;
@@ -605,4 +607,9 @@ class PostgresDbAdapter implements DbAdapter {
 
 // Export singleton instance based on environment variables
 const connectionString = process.env.DATABASE_URL;
-export const db: DbAdapter = connectionString ? new PostgresDbAdapter(connectionString) : new JsonDbAdapter();
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
+
+export const db: DbAdapter = (supabaseUrl && supabaseKey) 
+  ? new SupabaseDbAdapter(supabaseUrl, supabaseKey) 
+  : (connectionString ? new PostgresDbAdapter(connectionString) : new JsonDbAdapter());

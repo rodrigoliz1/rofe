@@ -261,6 +261,60 @@ function App() {
     };
   }, []);
 
+  // Sync Manager: Periodically attempt to sync offline orders
+  useEffect(() => {
+    const syncOfflineData = async () => {
+      if (!navigator.onLine) return;
+      
+      const offlineQueueStr = localStorage.getItem('motocarro_offline_sync');
+      if (!offlineQueueStr) return;
+      
+      const offlineQueue = JSON.parse(offlineQueueStr);
+      // Filter out those still waiting for card/cash payment completion (not finalized)
+      const readyToSync = offlineQueue.filter((item: any) => !item.isPendingPayment);
+      
+      if (readyToSync.length === 0) return;
+
+      try {
+        console.log(`Intentando sincronizar ${readyToSync.length} transacciones offline...`);
+        const response = await fetch(getApiUrl('/api/orders/sync'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ syncData: readyToSync })
+        });
+        
+        if (response.ok) {
+          console.log('Sincronización exitosa con Supabase/Backend.');
+          // Remove synced items from queue
+          const syncedIds = readyToSync.map((item: any) => item.order.id);
+          const remainingQueue = offlineQueue.filter((item: any) => !syncedIds.includes(item.order.id));
+          
+          if (remainingQueue.length === 0) {
+            localStorage.removeItem('motocarro_offline_sync');
+          } else {
+            localStorage.setItem('motocarro_offline_sync', JSON.stringify(remainingQueue));
+          }
+        }
+      } catch (error) {
+        console.error('Error al sincronizar datos offline, reintentando luego...', error);
+      }
+    };
+
+    // Run on mount and when 'online' event fires
+    window.addEventListener('online', syncOfflineData);
+    
+    // Periodically every 30 seconds
+    const interval = setInterval(syncOfflineData, 30000);
+    
+    // Initial check
+    syncOfflineData();
+
+    return () => {
+      window.removeEventListener('online', syncOfflineData);
+      clearInterval(interval);
+    };
+  }, []);
+
   const handleStart = () => {
     setStarted(true);
   };

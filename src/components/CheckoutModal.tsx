@@ -121,6 +121,23 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           console.error('Failed to create order on server, using offline fallback:', e);
           if (!active) return;
           setIsSimulationMode(true);
+          
+          // Save this pending order to localStorage
+          const pendingOrder: Order = {
+            id: orderId,
+            customerName,
+            items: cartItems,
+            total,
+            status: 'pending',
+            paymentMethod,
+            createdAt: new Date().toISOString()
+          };
+          
+          const offlineQueueStr = localStorage.getItem('motocarro_offline_sync') || '[]';
+          const offlineQueue = JSON.parse(offlineQueueStr);
+          offlineQueue.push({ order: pendingOrder, isPendingPayment: paymentMethod !== 'cash' });
+          localStorage.setItem('motocarro_offline_sync', JSON.stringify(offlineQueue));
+
           if (paymentMethod === 'cash') {
             setStep('cash_instructions');
           } else {
@@ -204,6 +221,26 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       }
     } catch (e) {
       console.error('Failed to simulate payment on backend, running local checkout:', e);
+      
+      // Update offline queue
+      const offlineQueueStr = localStorage.getItem('motocarro_offline_sync');
+      if (offlineQueueStr) {
+        let offlineQueue = JSON.parse(offlineQueueStr);
+        const index = offlineQueue.findIndex((q: any) => q.order.id === orderId);
+        if (index > -1) {
+          offlineQueue[index].order.status = 'paid';
+          offlineQueue[index].isPendingPayment = false;
+          // Add card payment transaction for offline sync
+          offlineQueue[index].cashTransaction = {
+            type: 'card_payment',
+            amount: total,
+            description: `Pago con tarjeta (Offline/Simulado) para orden ${orderId}`,
+            denominations: {}
+          };
+          localStorage.setItem('motocarro_offline_sync', JSON.stringify(offlineQueue));
+        }
+      }
+
       setTimeout(() => {
         setStep('success');
         playSuccessSound();
