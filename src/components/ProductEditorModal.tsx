@@ -170,8 +170,10 @@ export const ProductEditorModal: React.FC<ProductEditorModalProps> = ({ product,
 
             <div style={{ background: '#2c2c2c', padding: 15, borderRadius: 8, marginBottom: 15 }}>
               <h4 style={{ margin: '0 0 10px 0' }}>Constructor de Receta</h4>
-              {Object.entries(recipe).map(([id, qty]) => (
-                <div key={id} style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
+              {Object.entries(recipe).map(([id, qty]) => {
+                const rawItem = rawInventory.find(r => r.id === id);
+                return (
+                <div key={id} style={{ display: 'flex', gap: 10, marginBottom: 10, alignItems: 'center' }}>
                   <select 
                     className="admin-input-text" 
                     style={{ flex: 1, padding: 5 }} 
@@ -187,9 +189,10 @@ export const ProductEditorModal: React.FC<ProductEditorModalProps> = ({ product,
                     value={qty} 
                     onChange={e => updateRecipeItem(id, id, parseFloat(e.target.value))}
                   />
+                  <span style={{color: '#888', fontSize: '0.9rem', minWidth: 30}}>{rawItem ? rawItem.unit : ''}</span>
                   <button className="action-btn-small delete" onClick={() => removeRecipeItem(id)}>&times;</button>
                 </div>
-              ))}
+              )})}
               <button className="action-btn-small" onClick={handleAddRecipeItem}>+ Añadir Insumo</button>
             </div>
           </div>

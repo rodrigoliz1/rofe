@@ -393,6 +393,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
         setEditingRecipeProduct(null);
         setEditingRecipe({});
         loadAllData();
+        onInventoryUpdate();
       } else {
         alert('Error al guardar la receta.');
       }
@@ -856,7 +857,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   const maxProd = calculateMaxProduction(p);
                   const grossProfit = p.price - prepCost;
                   return (
-                    <tr key={p.id}>
+                    <tr key={p.id} className={isEditingMode ? 'clickable-row' : ''} onClick={() => { if (isEditingMode) setEditingProduct(p); }}>
                       <td className="inventory-product-cell font-bold">{p.name}</td>
                       <td style={{ color: maxProd !== null && maxProd < 10 ? '#f43f5e' : '#10b981', fontWeight: 'bold' }}>
                         {maxProd !== null ? `${maxProd} un.` : 'N/A'}
@@ -866,7 +867,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         <div className="cost-input-wrapper">
                           <span>$</span>
                           <input type="number" id={`price-${p.id}`} className="inventory-input-number" defaultValue={p.price} />
-                          <button className="admin-submit-btn" style={{padding: '5px 10px', fontSize: '0.8rem', marginLeft: 10}} onClick={() => {
+                          <button className="admin-submit-btn" style={{padding: '5px 10px', fontSize: '0.8rem', marginLeft: 10}} onClick={(e) => { e.stopPropagation();
                             const val = (document.getElementById(`price-${p.id}`) as HTMLInputElement).value;
                             handleUpdateProductPrice(p.id, parseFloat(val));
                           }}>Guardar</button>
@@ -876,8 +877,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         ${grossProfit.toFixed(2)} MXN
                       </td>
                       <td>
-                        <button className="admin-submit-btn" style={{padding: '5px 10px', fontSize: '0.8rem', background: '#4b5563'}} onClick={() => {
-                          setEditingRecipeProduct(p);
+                        <button className="admin-submit-btn" style={{padding: '5px 10px', fontSize: '0.8rem', background: '#4b5563'}} onClick={(e) => { e.stopPropagation();
+                            setEditingRecipeProduct(p);
                           setEditingRecipe(p.recipe || {});
                         }}>Ajustar Receta</button>
                       </td>
@@ -1169,11 +1170,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
             {showRawItemDetailModal && quickAddSelection && (
         <div className="checkout-modal-overlay" style={{ backdropFilter: 'blur(5px)' }} onClick={() => setShowRawItemDetailModal(false)}>
-          <div className="checkout-modal-content" onClick={e => e.stopPropagation()} style={{textAlign: 'center', maxWidth: 450, position: 'relative'}}>
-            <button 
-              onClick={() => setShowRawItemDetailModal(false)}
-              style={{position: 'absolute', top: 15, right: 15, background: 'transparent', border: 'none', color: '#888', fontSize: '1.5rem', cursor: 'pointer'}}
-            >✕</button>
+          <div className="barista-modal-dialog" onClick={e => e.stopPropagation()} style={{textAlign: 'center', maxWidth: 450, position: 'relative'}}>
+            <button className="barista-modal-close" onClick={() => setShowRawItemDetailModal(false)}>✕</button>
 
             {rawModalView === 'details' && (
               <>
@@ -1257,8 +1255,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
       )}
 
       {showNewRawItemModal && (
-        <div className="checkout-modal-overlay" onClick={() => setShowNewRawItemModal(false)}>
-          <div className="checkout-modal-content" onClick={e => e.stopPropagation()}>
+        <div className="barista-modal-backdrop" onClick={() => setShowNewRawItemModal(false)}>
+          <div className="barista-modal-dialog" onClick={e => e.stopPropagation()}>
             <h2 style={{color: '#ea580c', marginBottom: 20}}>Nuevo Insumo</h2>
             <div className="admin-form-group">
               <label>Nombre y Emoji (Ej. 🥛 Leche Entera)</label>

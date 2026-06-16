@@ -136,7 +136,7 @@ function App() {
           });
           loadInventory();
         } else if (data.type === 'inventory_updated') {
-          loadInventory();
+          loadProducts();
         } else if (data.type === 'clear_all') {
           setOrders([]);
           localStorage.removeItem('motocarro_orders');
