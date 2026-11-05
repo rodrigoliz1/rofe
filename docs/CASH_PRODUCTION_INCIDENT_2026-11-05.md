@@ -70,3 +70,16 @@ La validación financiera física queda a cargo de una operación normal autoriz
 del responsable: apertura con conteo real, operación aprobada y cierre con conteo
 real. Las comprobaciones automatizadas de producción serán exclusivamente de lectura
 (o cotización sin persistencia); no crearán cortes ni cobros de prueba.
+
+## Estado comprobado tras aplicación
+
+El dueño confirmó aplicación de 009. A las **21:18:35 UTC del 5-nov-2026** el RPC
+remoto de solo lectura devolvió **9**. Se compararon filas completas (ordenadas) de
+las seis tablas financieras anteriores: **todas idénticas** a la instantánea previa.
+No hubo ajustes de efectivo ni cambios históricos. Evidencia privada, sin secretos
+publicados: `.rofe-local/evidence/cash-close-production/readonly-verification.json`.
+
+Validación local del parche: lint, typecheck de ambos proyectos, 33 pruebas frontend,
+69 backend, 78 E2E, compilaciones frontend/backend y PostgreSQL con pg-safeupdate
+real y concurrencia. Dependencias de producción: cero vulnerabilidades en ambos
+proyectos. La operación financiera física de producción no se ejecutó como prueba.

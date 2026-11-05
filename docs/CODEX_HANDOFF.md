@@ -179,8 +179,8 @@ Soporte `d25e4980-a770-4768-88cc-79465d24d8d9`: **apertura**, RPC
 pg-safeupdate. El cierre tenía el mismo defecto. Ver diagnóstico y aplicación
 segura en [CASH_PRODUCTION_INCIDENT_2026-11-05.md](CASH_PRODUCTION_INCIDENT_2026-11-05.md).
 
-009 reemplaza ambas funciones sin tocar registros financieros; **aplicación remota
-pendiente de confirmación**. No volver a ejecutar 008 ni modificar saldos como
+009 reemplaza ambas funciones sin tocar registros financieros; **aplicada por el
+dueño y confirmada por RPC de solo lectura: versión 9, 5-nov-2026 21:18 UTC**. No volver a ejecutar 008 ni modificar saldos como
 solución. La regresión PostgreSQL ahora cubre el guard real, reversión ante fallo
-del informe y carreras de apertura/cierre. La base productiva seguía en 8 al
-comprobarla y no tenía sesiones ni movimientos de sesión; conserva registros legacy.
+del informe y carreras de apertura/cierre. La base productiva no tenía sesiones ni movimientos de sesión; los seis conjuntos
+financieros se compararon antes/después y permanecen idénticos. Conserva registros legacy.
