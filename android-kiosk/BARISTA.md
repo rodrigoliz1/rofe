@@ -14,9 +14,10 @@ Identidades, iconos, preferencias privadas, cookies/WebView, versiones, keystore
 Los archivos de entrega se conservan en `android-kiosk/dist/` (ignorados por Git). `ROFE-Barista.apk` y `ROFE-Kiosco.apk` son las builds debug para pruebas locales mediante USB. No sustituyen una instalación release existente. Requieren que esta Mac mantenga abierto `npm run dev`.
 
 1. En la M10 #2 activa Opciones de desarrollador → Depuración USB y conecta el cable. Autoriza esta Mac en la tablet.
-2. Desde la carpeta del proyecto, con `adb` del Android SDK disponible:
+2. Desde la carpeta del proyecto. En esta Mac el SDK se conservó dentro del perfil local; este alias permite usarlo sin instalar nada globalmente:
 
 ```sh
+alias adb="$PWD/.rofe-local/android-toolchain/sdk/platform-tools/adb"
 adb devices
 adb install -r android-kiosk/dist/ROFE-Barista.apk
 adb reverse tcp:5173 tcp:5173
@@ -49,9 +50,11 @@ La cámara se detiene al cerrar el escáner, cambiar de pantalla, ocultar la pá
 
 ## Compilar y actualizar
 
-JDK 17, Android SDK plataforma 35 y Gradle Wrapper del repositorio:
+JDK 17, Android SDK plataforma 35 y Gradle Wrapper del repositorio. En esta Mac se conservaron bajo `.rofe-local/android-toolchain/`, excluidos de Git:
 
 ```sh
+export JAVA_HOME="$PWD/.rofe-local/android-toolchain/jdk-17.0.21+9/Contents/Home"
+export ANDROID_HOME="$PWD/.rofe-local/android-toolchain/sdk"
 cd android-kiosk
 ./gradlew :barista:testDebugUnitTest :barista:lintDebug :barista:assembleDebug
 ./gradlew :barista:assembleRelease
