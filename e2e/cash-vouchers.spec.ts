@@ -25,6 +25,19 @@ async function cashOrder(request: APIRequestContext, headers: Record<string, str
   return (await response.json()).order as { id: string; total: number; discount?: number };
 }
 
+/** Leaves the shared backend as other specs expect it: no open cash session, KDS queue clear. */
+async function cleanUp(request: APIRequestContext, orderIds: string[]) {
+  const admin = await token(request, 'admin@rofe.test', 'TestAdmin123!');
+  for (const id of orderIds) {
+    for (const status of ['IN_PREPARATION', 'READY', 'COMPLETED']) await request.post(`${API}/api/orders/${id}/status`, { headers: admin, data: { status } });
+  }
+  const current = (await (await request.get(`${API}/api/admin/cash/session`, { headers: admin })).json()) as { current?: { id: string } };
+  if (current.current) {
+    const drawer = await (await request.get(`${API}/api/cash/denominations`, { headers: admin })).json() as Record<string, number>;
+    await request.post(`${API}/api/admin/cash/session/close`, { headers: admin, data: { denominations: drawer } });
+  }
+}
+
 async function authorizeDevice(page: Page, name: string) {
   await page.goto('/');
   await page.getByLabel('Nombre de la terminal').fill(name);
@@ -129,6 +142,7 @@ test('insufficient change issues a voucher that can be used, released and paid o
   const closed = await request.post(`${API}/api/admin/cash/session/close`, { headers: admin, data: { denominations: drawer } });
   expect(closed.status()).toBe(200);
   expect(await closed.json()).toMatchObject({ expectedCash: 113, countedCash: 113, difference: 0 });
+  await cleanUp(request, [order.id, espresso.id]);
 });
 
 test('the customer can cancel when there is not enough change, and nothing is charged', async ({ request }) => {
@@ -146,6 +160,7 @@ test('the customer can cancel when there is not enough change, and nothing is ch
   await request.post(`${API}/api/orders/${paid.id}/cash-payment`, { headers: barista, data: { receivedDenominations: { bill_20: 1, coin_10: 1, coin_5: 1, coin_2: 1, coin_1: 1 }, changeDenominations: {}, receivedAmount: 38, changeAmount: 0 } });
   expect((await request.post(`${API}/api/orders/${paid.id}/cancel-insufficient-change`, { headers: barista })).status()).toBe(409);
   expect((await request.post(`${API}/api/orders/${paid.id}/cancel-insufficient-change`, { headers: device })).status()).toBe(403);
+  await cleanUp(request, [paid.id]);
 });
 
 test('a voucher in checkout lowers the total, and one that covers everything confirms the order', async ({ page, request }) => {
@@ -184,4 +199,6 @@ test('a voucher in checkout lowers the total, and one that covers everything con
   await expect(page.getByRole('heading', { name: 'PAGO APROBADO' })).toBeVisible();
   const after = (await (await request.get(`${API}/api/vouchers/${voucher.code}`, { headers: barista })).json()).voucher as { balance: number; status: string };
   expect(after).toMatchObject({ balance: 910, status: 'ACTIVE' });
+  const paidOrders = (await (await request.get(`${API}/api/orders`, { headers: barista })).json() as Array<{ id: string; status: string; customerName?: string }>).filter((entry) => entry.status === 'PAID' && entry.customerName === 'Cupón total');
+  await cleanUp(request, [sale.id, ...paidOrders.map((entry) => entry.id)]);
 });

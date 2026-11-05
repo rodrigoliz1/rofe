@@ -3,24 +3,32 @@
   "products": {
     "espresso": {
       "name": "Espresso",
-      "status": "approved",
+      "status": "interim",
       "source": "public/espresso.webp",
       "focus": {
         "x": 0.53,
         "y": 0.6,
         "scale": 0.82
       },
-      "prompt": "A double espresso in a small white ceramic demitasse on a matching saucer, thick golden-hazelnut crema with fine tiger striping, a few drops of crema on the rim, nothing else on the surface."
+      "prompt": "A single espresso in a small white ceramic demitasse on a matching saucer, thick golden-hazelnut crema with fine tiger striping, nothing else on the surface.",
+      "note": "Foto antigua del repositorio, correcta para el producto pero de estilo distinto: provisional hasta tener la nueva colección."
+    },
+    "double-espresso": {
+      "name": "Double Espresso",
+      "prompt": "A double espresso in a slightly larger white ceramic cup on a saucer, deep dark-brown coffee with a thick hazelnut crema, a visibly fuller cup than a single espresso, nothing else on the surface.",
+      "status": "pending",
+      "note": "Sin fotografía propia (no puede compartir la del Espresso)."
     },
     "americano": {
       "name": "Americano",
-      "status": "approved",
+      "status": "interim",
       "source": "public/americano.webp",
       "focus": {
         "x": 0.45,
         "y": 0.5
       },
-      "prompt": "An americano in a clear double-walled glass mug, deep brown coffee with a thin light crema on top, visible transparency of the glass, nothing else on the surface."
+      "prompt": "An americano in a clear double-walled glass mug, deep brown coffee with a thin light crema on top, visible transparency of the glass, nothing else on the surface.",
+      "note": "Foto antigua del repositorio, correcta para el producto pero de estilo distinto: provisional hasta tener la nueva colección."
     },
     "latte": {
       "name": "Latte",
@@ -28,32 +36,51 @@
       "note": "No hay fotografía de un latte caliente: la anterior era la del iced latte. Se muestra la ilustración de marca hasta aprobar una foto.",
       "prompt": "A hot café latte in a wide cream-colored ceramic cup on a saucer, glossy microfoam with a symmetrical rosetta latte art, warm caramel-brown edges, light steam, nothing else on the surface."
     },
+    "flat-white": {
+      "name": "Flat White",
+      "prompt": "A flat white in a small 160 ml cream ceramic cup on a saucer, thin glossy microfoam with a small tulip latte art, rich coffee-brown edges, nothing else on the surface.",
+      "status": "pending",
+      "note": "Sin fotografía propia; la base de producción apuntaba a una imagen externa de Unsplash, bloqueada en la APK."
+    },
     "matcha-latte": {
       "name": "Matcha latte",
-      "status": "approved",
+      "status": "interim",
       "source": "public/matcha-latte.jpg",
-      "prompt": "A hot matcha latte in a white ceramic cup, vivid jade-green surface with white leaf latte art, velvety microfoam, nothing else on the surface."
+      "prompt": "A hot matcha latte in a white ceramic cup, vivid jade-green surface with white leaf latte art, velvety microfoam, nothing else on the surface.",
+      "note": "Foto antigua del repositorio, correcta para el producto pero de estilo distinto: provisional hasta tener la nueva colección."
     },
     "cold-brew": {
       "name": "Cold brew",
-      "status": "approved",
+      "status": "interim",
       "source": "public/cold-brew.webp",
       "focus": {
         "x": 0.5,
         "y": 0.55
       },
-      "note": "Aprobada temporalmente: muestra parte de un delantal y la mano que sirve. Sustituir por una foto con el estilo maestro.",
+      "note": "Foto antigua provisional (fondo oscuro, aparecen mano y delantal): sustituir por la nueva colección.",
       "prompt": "A cold brew coffee in a tall clear tumbler with large clear ice cubes, deep amber-mahogany color with light passing through, tiny condensation droplets on the glass, nothing else on the surface."
     },
     "iced-latte": {
       "name": "Iced latte",
-      "status": "approved",
+      "status": "interim",
       "source": "public/iced-latte.webp",
       "focus": {
         "x": 0.45,
         "y": 0.47
       },
-      "prompt": "An iced latte in a tall clear glass with ice cubes, milk and espresso gently layered from cream to caramel brown, a clear glass straw, light condensation, nothing else on the surface."
+      "prompt": "An iced latte in a tall clear glass with ice cubes, milk and espresso gently layered from cream to caramel brown, a clear glass straw, light condensation, nothing else on the surface.",
+      "note": "Foto antigua del repositorio, correcta para el producto pero de estilo distinto: provisional hasta tener la nueva colección."
+    },
+    "iced-matcha-latte": {
+      "name": "Iced Matcha Latte",
+      "prompt": "An iced matcha latte in a tall clear glass with clear ice cubes, vivid jade-green matcha floating over white milk with a soft gradient, light condensation, nothing else on the surface.",
+      "status": "interim",
+      "source": "public/matcha-frio.jpg",
+      "focus": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "note": "Foto antigua provisional (fondo oscuro): sustituir por la nueva colección."
     },
     "croissant-mantequilla": {
       "name": "Croissant de mantequilla",
@@ -61,16 +88,40 @@
       "note": "La única foto disponible (pan-chocolate.jpg) muestra panes de chocolate, no un croissant de mantequilla. Se muestra la ilustración de marca hasta aprobar una foto.",
       "prompt": "A single golden butter croissant with crisp flaky laminated layers and a glossy egg-washed crust, resting on a small cream ceramic plate, a few flakes of pastry on the surface."
     },
+    "pain-au-chocolat": {
+      "name": "Pain au Chocolat",
+      "prompt": "A single golden pain au chocolat with crisp laminated layers, two dark chocolate batons visible at the ends, on a small cream ceramic plate, nothing else on the surface.",
+      "status": "interim",
+      "source": "public/pan-chocolate.jpg",
+      "focus": {
+        "x": 0.33,
+        "y": 0.72,
+        "scale": 0.62
+      },
+      "note": "Recorte provisional de la foto antigua: sustituir por la nueva colección."
+    },
     "galleta-chocolate": {
       "name": "Galleta de chocolate",
-      "status": "approved",
+      "status": "interim",
       "source": "public/galleta-chispas.jpeg",
       "focus": {
         "x": 0.44,
         "y": 0.62,
         "scale": 0.9
       },
-      "prompt": "Two soft-baked chocolate chip cookies stacked slightly offset, golden edges, melted dark chocolate chunks, a light dusting of flaky sea salt, on parchment over the stone surface."
+      "prompt": "Two soft-baked chocolate chip cookies stacked slightly offset, golden edges, melted dark chocolate chunks, a light dusting of flaky sea salt, on parchment over the stone surface.",
+      "note": "Foto antigua del repositorio, correcta para el producto pero de estilo distinto: provisional hasta tener la nueva colección."
     }
+  },
+  "output": {
+    "format": "WebP quality 80, 1:1",
+    "card": [
+      384,
+      640
+    ],
+    "detail": [
+      960
+    ],
+    "source_minimum": "1024×1024 px, 1:1, PNG/JPEG/WebP, sRGB"
   }
 }

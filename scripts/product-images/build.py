@@ -47,10 +47,12 @@ def encode(image: Image.Image, size: int) -> bytes:
 
 def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    manifest = {"version": 1, "style": SOURCES["style"], "products": {}}
+    manifest = {"version": 2, "style": SOURCES["style"], "products": {}}
     produced: set[str] = set()
     for product_id, spec in SOURCES["products"].items():
         entry = {"name": spec["name"], "status": spec["status"], "prompt": spec["prompt"], "note": spec.get("note", "")}
+        if spec.get("approvedAt"):
+            entry["approvedAt"] = spec["approvedAt"]
         if spec.get("source"):
             source = ROOT / spec["source"]
             image = ImageOps.exif_transpose(Image.open(source)).convert("RGB")

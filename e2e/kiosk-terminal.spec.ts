@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 
 /*
@@ -331,6 +332,9 @@ test('small and short viewports keep the panel header and CTA reachable', async 
 });
 
 test('every product shows its own photo or the brand illustration — never a wrong or broken image', async ({ page }) => {
+  const manifest = JSON.parse(readFileSync('src/kiosk/productImages.json', 'utf8')) as { products: Record<string, { name: string; status: string }> };
+  const failed: string[] = [];
+  page.on('response', (response) => { if (/\.(png|jpe?g|webp)(\?|$)/.test(response.url()) && response.status() >= 400) failed.push(`${response.status()} ${response.url()}`); });
   await authorize(page, 'M10 fotos');
   await start(page);
   const cards = page.locator('.kiosk-catalog .product-card');
@@ -339,14 +343,16 @@ test('every product shows its own photo or the brand illustration — never a wr
     const image = card.querySelector('img');
     return { name: card.querySelector('.product-card-name')?.textContent, source: card.querySelector('[data-photo]')?.getAttribute('data-photo'), src: image?.getAttribute('src') ?? null };
   }));
+  const statusByName = new Map(Object.values(manifest.products).map((entry) => [entry.name.toLowerCase(), entry.status]));
   const bySrc = new Map<string, string[]>();
   for (const photo of photos) {
-    if (photo.name === 'Latte' || photo.name === 'Croissant de mantequilla') { expect(photo.source, `${photo.name} waits for an approved photo`).toBe('pending'); expect(photo.src).toBeNull(); continue; }
-    expect(photo.source, `${photo.name}`).toBe('catalog');
+    const status = statusByName.get(photo.name!.toLowerCase());
+    expect(status, `${photo.name} is in the photo manifest`).toBeDefined();
+    if (status === 'pending') { expect(photo.source, `${photo.name} is clearly pending`).toBe('pending'); expect(photo.src).toBeNull(); continue; }
+    expect(photo.source, `${photo.name}`).toBe(status);
     expect(photo.src).toMatch(/^\/products\/[a-z-]+-\d+\.[0-9a-f]{10}\.webp$/);
     bySrc.set(photo.src!, [...(bySrc.get(photo.src!) ?? []), photo.name!]);
   }
-  // No two products share the same picture.
   for (const [src, names] of bySrc) expect(names, src).toHaveLength(1);
   for (const src of bySrc.keys()) {
     const response = await page.request.get(src);
@@ -356,6 +362,34 @@ test('every product shows its own photo or the brand illustration — never a wr
   }
   await page.locator('.kiosk-catalog .products-grid').evaluate((grid) => grid.scrollTo({ top: grid.scrollHeight }));
   await expect.poll(() => cards.locator('img').evaluateAll((images) => images.every((image) => (image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth > 0))).toBe(true);
+  expect(failed).toEqual([]);
+});
+
+test('the production catalog rows (/espresso.png, Unsplash URLs, 12 products) never produce a 404 or an external request', async ({ page }) => {
+  const requested: string[] = [];
+  page.on('request', (request) => { if (request.resourceType() === 'image') requested.push(request.url()); });
+  // Exactly what the production database returns (seeded by an older app version).
+  await page.route('**/api/products', async (route) => {
+    const response = await route.fetch();
+    const products = await response.json() as Array<Record<string, unknown>>;
+    const legacy: Record<string, string> = { espresso: '/espresso.png', latte: 'https://images.unsplash.com/photo-1541167760496-1628856ab772?w=600', 'croissant-mantequilla': 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?w=600' };
+    const extra = [
+      { id: 'double-espresso', name: 'Double Espresso', image: '/espresso.png', category: 'coffee' },
+      { id: 'flat-white', name: 'Flat White', image: 'https://images.unsplash.com/photo-1577968897966-3d4325b36b61?w=600', category: 'coffee' },
+      { id: 'iced-matcha-latte', name: 'Iced Matcha Latte', image: '/matcha-frio.jpg', category: 'cold' },
+      { id: 'pain-au-chocolat', name: 'Pain au Chocolat', image: '/pan-chocolate.jpg', category: 'bakery' },
+    ].map((row) => ({ ...products[0], ...row, description: row.name, price: 50, customizable: false, stock: 10 }));
+    await route.fulfill({ response, json: [...products.map((product) => ({ ...product, image: legacy[product.id as string] ?? product.image })), ...extra] });
+  });
+  await authorize(page, 'M10 catálogo producción');
+  await start(page);
+  await expect(page.locator('.kiosk-catalog .product-card')).toHaveCount(12);
+  await page.locator('.kiosk-catalog .products-grid').evaluate((grid) => grid.scrollTo({ top: grid.scrollHeight }));
+  await page.waitForTimeout(500);
+  expect(requested.filter((url) => /espresso\.png|unsplash|matcha-frio\.jpg|pan-chocolate\.jpg/.test(url))).toEqual([]);
+  expect(requested.every((url) => new URL(url).origin === 'http://127.0.0.1:4173')).toBe(true);
+  const pending = await page.locator('.kiosk-catalog [data-photo="pending"]').count();
+  expect(pending).toBe(4); // double espresso, latte, flat white, croissant: brand illustration until approved
 });
 
 test('a photo that fails to load falls back to the brand illustration', async ({ page }) => {
@@ -369,9 +403,13 @@ test('a photo that fails to load falls back to the brand illustration', async ({
 
 test('photos are downloaded and decoded on the welcome screen, ready when the menu opens', async ({ page }, testInfo) => {
   await authorize(page, 'M10 precarga');
+  // Cold: first visit of a fresh browser profile; the welcome screen preloads by itself.
+  await page.waitForFunction(() => Boolean(window.__rofeKioskPreload));
+  const cold = await page.evaluate(() => window.__rofeKioskPreload!);
+  await expect(page.getByRole('button', { name: /ORDENAR AQUÍ/ })).toBeVisible();
+  // Warm: the tablet restarts the page (photos come from the HTTP / service-worker cache).
   await page.reload();
   await expect(page.getByRole('button', { name: /ORDENAR AQUÍ/ })).toBeVisible();
-  // The welcome screen preloads the first screen without being touched.
   await page.waitForFunction(() => Boolean(window.__rofeKioskPreload));
   const preload = await page.evaluate(() => window.__rofeKioskPreload!);
   expect(preload.total).toBe(6);
@@ -383,7 +421,7 @@ test('photos are downloaded and decoded on the welcome screen, ready when the me
     return visible.length > 0 && visible.every((wrapper) => wrapper.classList.contains('is-loaded'));
   });
   const paintedMs = (await page.evaluate(() => performance.now())) - clickedAt;
-  const report = { firstScreenPreloadMs: Math.round(preload.firstScreenMs), allPreloadMs: Math.round(preload.allMs), photos: preload.total, menuPhotosPaintedAfterTapMs: Math.round(paintedMs), environment: 'emulated: desktop Chromium, local preview server, no network throttling' };
+  const report = { coldFirstScreenMs: Math.round(cold.firstScreenMs), coldAllMs: Math.round(cold.allMs), warmFirstScreenMs: Math.round(preload.firstScreenMs), warmAllMs: Math.round(preload.allMs), photos: preload.total, menuPhotosPaintedAfterTapMs: Math.round(paintedMs), preloadFinishedBeforeTap: true, environment: 'emulated: desktop Chromium, local preview server, no network throttling' };
   await testInfo.attach('preload-metrics.json', { body: JSON.stringify(report, null, 2), contentType: 'application/json' });
   console.log(`[kiosk metrics ${testInfo.project.name}]`, JSON.stringify(report));
   expect(paintedMs).toBeLessThan(500);
@@ -407,4 +445,22 @@ test('long-press on the logo opens staff access in a browser (no native shell)',
   await page.waitForTimeout(5_300);
   await page.mouse.up();
   await expect(page.getByLabel('Correo')).toBeVisible();
+});
+
+test('throttled cold start (8 Mbps, 60 ms): the welcome screen finishes preloading in a few seconds', async ({ page }, testInfo) => {
+  await authorize(page, 'M10 red lenta');
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Network.enable');
+  await cdp.send('Network.clearBrowserCache');
+  await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 60, downloadThroughput: (8 * 1024 * 1024) / 8, uploadThroughput: (2 * 1024 * 1024) / 8 });
+  const loadStarted = Date.now();
+  await page.reload();
+  await expect(page.getByRole('button', { name: /ORDENAR AQUÍ/ })).toBeVisible({ timeout: 15_000 });
+  const welcomeMs = Date.now() - loadStarted;
+  await page.waitForFunction(() => Boolean(window.__rofeKioskPreload), undefined, { timeout: 20_000 });
+  const preload = await page.evaluate(() => window.__rofeKioskPreload!);
+  const report = { network: '8 Mbps / 60 ms (emulated)', welcomeVisibleMs: welcomeMs, firstScreenPhotosMs: Math.round(preload.firstScreenMs), allPhotosMs: Math.round(preload.allMs) };
+  console.log(`[kiosk metrics throttled ${testInfo.project.name}]`, JSON.stringify(report));
+  await testInfo.attach('throttled-metrics.json', { body: JSON.stringify(report, null, 2), contentType: 'application/json' });
+  expect(preload.allMs).toBeLessThan(5_000);
 });

@@ -3,28 +3,32 @@ import manifest from '../kiosk/productImages.json';
 import { apiUrl } from './api';
 
 /**
- * Catalog photos.
+ * Catalog photos — explicit precedence policy (see docs/CATALOG_PHOTOS.md):
  *
- * Seed products point at the original files in /public (`/espresso.webp`, …). Those are
- * replaced by the optimized, square, content-hashed variants in /products (built by
- * scripts/product-images/build.py). A photo uploaded from the admin panel (Supabase
- * Storage or /api/product-images/…) always wins, so production data needs no migration.
- * Products whose photo is still pending show the branded illustration instead of a
- * wrong picture (e.g. a hot latte shown with the iced-latte photo).
+ * 1. APPROVED photo of the new collection (manifest status "approved").
+ *    Wins over anything stored in the database, except…
+ * 2. …a photo UPLOADED FROM ADMIN after that approval (Supabase Storage names start with
+ *    the upload timestamp). An upload also wins over interim/pending photos.
+ * 3. INTERIM photo (manifest status "interim"): an old repository photo that shows the
+ *    right product, optimized, used only until the new collection is approved.
+ * 4. PENDING (no correct photo yet): brand illustration — never a wrong picture.
+ *
+ * Old database references (/espresso.png, seed paths, external Unsplash URLs blocked by the
+ * Android shell) are never trusted over the manifest. Files are content-hashed, so a new
+ * approval changes the URL and every cache (HTTP, service worker, WebView) picks it up.
  */
 interface Variant { url: string; bytes: number }
-interface ManifestEntry { status: 'approved' | 'pending'; card?: Record<string, Variant>; detail?: Record<string, Variant> }
+type Status = 'approved' | 'interim' | 'pending';
+interface ManifestEntry { status: Status; approvedAt?: string; card?: Record<string, Variant>; detail?: Record<string, Variant> }
 const entries = (manifest as { products: Record<string, ManifestEntry> }).products;
 
-/** Original paths shipped with the seed catalog (migration 001 / domain/catalog.ts). */
-const SEED_PATHS = new Set(['/espresso.webp', '/americano.webp', '/iced-latte.webp', '/matcha-latte.jpg', '/cold-brew.webp', '/pan-chocolate.jpg', '/galleta-chispas.jpeg', '/matcha-frio.jpg']);
-
+export type PhotoSource = 'approved' | 'uploaded' | 'interim' | 'pending' | 'legacy' | 'none';
 export interface ProductPhoto {
   /** Card image (null → branded illustration). */
   card: string | null;
   /** Larger image for the product sheet. */
   detail: string | null;
-  source: 'uploaded' | 'catalog' | 'legacy' | 'pending' | 'none';
+  source: PhotoSource;
 }
 
 const pick = (variants: Record<string, Variant> | undefined, minWidth: number) => {
@@ -33,18 +37,39 @@ const pick = (variants: Record<string, Variant> | undefined, minWidth: number) =
   return (sorted.find(([size]) => size >= minWidth) ?? sorted.at(-1))?.[1] ?? null;
 };
 
+/** Admin uploads: Supabase Storage (product_images bucket) or the dev server's /api/product-images. */
+export function uploadedPhoto(image: string): { url: string; uploadedAt: number } | null {
+  if (image.startsWith('/api/product-images/')) return { url: apiUrl(image), uploadedAt: Number.POSITIVE_INFINITY };
+  const match = /^https:\/\/[a-z0-9-]+\.supabase\.co\/storage\/v1\/object\/public\/product_images\/(\d{13})?[^/]*$/i.exec(image);
+  if (!match) return null;
+  return { url: image, uploadedAt: match[1] ? Number(match[1]) : Number.POSITIVE_INFINITY };
+}
+
 /** One deterministic URL per product and screen, shared by <img> and the preloader. */
 export function productPhoto(product: Pick<Product, 'id' | 'image'>, devicePixelRatio = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1): ProductPhoto {
-  const image = product.image?.trim() ?? '';
-  if (image && !SEED_PATHS.has(image)) {
-    const url = image.startsWith('/api/') ? apiUrl(image) : image;
-    return { card: url, detail: url, source: 'uploaded' };
-  }
   const entry = entries[product.id];
-  if (entry?.status === 'approved' && entry.card) {
+  const uploaded = uploadedPhoto(product.image?.trim() ?? '');
+  const fromManifest = (source: 'approved' | 'interim'): ProductPhoto => ({
     // Cards render at ~200–360 CSS px; 1.5× tablets need the 640 px variant.
-    return { card: pick(entry.card, devicePixelRatio > 1.25 ? 600 : 380), detail: pick(entry.detail, 900) ?? pick(entry.card, 600), source: 'catalog' };
+    card: pick(entry!.card, devicePixelRatio > 1.25 ? 600 : 380),
+    detail: pick(entry!.detail, 900) ?? pick(entry!.card, 600),
+    source,
+  });
+  if (entry?.status === 'approved' && entry.card) {
+    const approvedAt = entry.approvedAt ? Date.parse(entry.approvedAt) : 0;
+    if (uploaded && uploaded.uploadedAt > approvedAt) return { card: uploaded.url, detail: uploaded.url, source: 'uploaded' };
+    return fromManifest('approved');
   }
-  if (entry?.status === 'pending') return { card: null, detail: null, source: 'pending' };
-  return image ? { card: image, detail: image, source: 'legacy' } : { card: null, detail: null, source: 'none' };
+  if (uploaded) return { card: uploaded.url, detail: uploaded.url, source: 'uploaded' };
+  if (entry?.status === 'interim' && entry.card) return fromManifest('interim');
+  if (entry) return { card: null, detail: null, source: 'pending' };
+  // Products created from Admin without a manifest entry: only same-origin files are trusted.
+  const image = product.image?.trim() ?? '';
+  if (image.startsWith('/') && !image.startsWith('//')) return { card: image, detail: image, source: 'legacy' };
+  return { card: null, detail: null, source: 'none' };
+}
+
+/** For reports and tests: the catalog's photo status per product id. */
+export function photoStatus(productId: string): Status | 'unknown' {
+  return entries[productId]?.status ?? 'unknown';
 }
