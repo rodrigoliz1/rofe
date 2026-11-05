@@ -1,4 +1,4 @@
-import type { DbAdapter, DbOrder } from '../db';
+import { amountDue, type DbAdapter, type DbOrder } from '../db';
 import { calculateRecipeConsumption } from '../domain/inventory';
 import type { PricedOrderItem } from '../domain/pricing';
 import { AppError } from '../utils/errors';
@@ -15,7 +15,7 @@ export async function reconcilePointOrder(db: DbAdapter, provider: MercadoPagoOr
     const transaction = provider.transactions?.payments?.[0];
     const tip = Number(transaction?.tip_amount ?? 0);
     const amount = Number(transaction?.paid_amount ?? provider.total_paid_amount) - tip;
-    if ((provider.currency && provider.currency !== 'MXN') || !Number.isFinite(tip) || tip < 0 || !Number.isFinite(amount) || Math.abs(amount - local.total) > 0.001) {
+    if ((provider.currency && provider.currency !== 'MXN') || !Number.isFinite(tip) || tip < 0 || !Number.isFinite(amount) || Math.abs(amount - amountDue(local)) > 0.001) {
       throw new AppError(409, 'PAYMENT_AMOUNT_MISMATCH', 'El importe confirmado no coincide con el pedido.');
     }
     if (local.paymentStatus !== 'APPROVED' && local.paymentStatus !== 'REFUNDED' && local.status !== 'CANCELLED') {
@@ -36,7 +36,8 @@ export async function reconcilePointOrder(db: DbAdapter, provider: MercadoPagoOr
 export async function sendOrderToPoint(db: DbAdapter, service: MercadoPagoService, order: DbOrder): Promise<DbOrder> {
   if (order.paymentIntentId || order.paymentStatus !== 'PENDING' || order.status !== 'PENDING_PAYMENT') return order;
   await db.reserveOrderInventory(order.id, calculateRecipeConsumption(order.items as PricedOrderItem[]));
-  const provider = await service.createPointOrder({ orderId: order.id, total: order.total, idempotencyKey: order.operationId! });
+  // Vouchers already paid part of the total: the terminal charges only what is due.
+  const provider = await service.createPointOrder({ orderId: order.id, total: amountDue(order), idempotencyKey: order.operationId! });
   if (provider.external_reference !== order.id) throw new AppError(502, 'PAYMENT_REFERENCE_MISMATCH', 'Mercado Pago devolvió una referencia inesperada. Solicita ayuda.');
   await db.attachPaymentIntent(order.id, provider.id);
   return { ...order, paymentIntentId: provider.id };

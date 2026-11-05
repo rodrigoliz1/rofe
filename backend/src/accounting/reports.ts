@@ -30,10 +30,14 @@ export function buildOperationalReport(input: ReportInput) {
   const byHour = Array.from({ length: 24 }, (_, hour) => ({ hour, tickets: 0, revenue: 0 }));
   let cashSales = 0;
   let cardSales = 0;
+  // Change vouchers settle a liability: that part of the revenue was collected earlier in cash.
+  let voucherSettled = 0;
 
   for (const order of orders) {
-    if (order.paymentMethod === 'cash') cashSales += order.total;
-    else cardSales += order.total;
+    const voucherPart = Number(order.voucherAmount || 0);
+    voucherSettled += voucherPart;
+    if (order.paymentMethod === 'cash') cashSales += order.total - voucherPart;
+    else cardSales += order.total - voucherPart;
     const hour = new Date(order.createdAt).getHours();
     byHour[hour].tickets += 1;
     byHour[hour].revenue = toMoney(byHour[hour].revenue + order.total);
@@ -77,6 +81,8 @@ export function buildOperationalReport(input: ReportInput) {
     tickets: allPaidOrders.length,
     averageTicket: allPaidOrders.length ? toMoney(grossSales / allPaidOrders.length) : 0,
     cashSales: toMoney(cashSales),
+    /** Part of the revenue settled with change vouchers (cash already collected when the voucher was issued). */
+    voucherSettled: toMoney(voucherSettled),
     cardSales: toMoney(cardSales),
     costOfGoodsSold,
     grossMargin,

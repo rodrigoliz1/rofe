@@ -240,6 +240,8 @@ export interface DbOrder {
   discountType?: string;
   discountReason?: string;
   discountAuthorizedBy?: string;
+  /** Part of `total` paid with change vouchers (a liability settlement, not a discount). */
+  voucherAmount?: number;
   tax?: number;
   total: number;
   status: string;
@@ -264,6 +266,27 @@ export interface DbChangeVoucher {
   createdBy?: string;
   createdAt: string;
   updatedAt: string;
+  cancelledReason?: string;
+  cancelledBy?: string;
+  cancelledAt?: string;
+}
+
+export interface DbChangeVoucherRedemption {
+  id: string;
+  voucherId: string;
+  kind: 'CASH' | 'ORDER';
+  amount: number;
+  orderId?: string;
+  operationId: string;
+  status: 'APPLIED' | 'RELEASED';
+  denominations: Record<string, number>;
+  userId?: string;
+  createdAt: string;
+}
+
+/** What the customer still has to pay after vouchers. */
+export function amountDue(order: Pick<DbOrder, 'total' | 'voucherAmount'>): number {
+  return Math.round((order.total - (order.voucherAmount ?? 0)) * 100) / 100;
 }
 
 export interface CashPaymentInput {
@@ -304,6 +327,12 @@ export interface DbAdapter {
   applyChangeVoucherToOrder(input: { code: string; orderId: string; operationId: string; amount: number }): Promise<boolean>;
   /** Gives back what a cancelled order took from a voucher. Idempotent; returns the amount released. */
   releaseChangeVoucherForOrder(orderId: string): Promise<number>;
+  /** Using vouchers on orders needs migration 008 (orders.voucher_amount). */
+  voucherOrdersAvailable(): Promise<boolean>;
+  /** Releases reservations older than 10 minutes whose order was never stored. */
+  releaseOrphanVoucherRedemptions(code: string): Promise<number>;
+  cancelChangeVoucher(input: { code: string; reason: string; userId: string }): Promise<boolean>;
+  listChangeVouchers(): Promise<Array<DbChangeVoucher & { redemptions: DbChangeVoucherRedemption[] }>>;
   applyOrderRefund(input: { orderId: string; operationId: string; reason: string; userId: string; cashDenominations?: Record<string, number> }): Promise<boolean>;
   getInventory(): Promise<DbInventoryItem[]>;
   updateInventory(productId: string, stock: number, cost: number): Promise<void>;
@@ -364,7 +393,7 @@ export class JsonDbAdapter implements DbAdapter {
     pickupSettings?: DbPickupSettings;
     inventoryReservations?: Array<{ orderId: string; consumption: DbInventoryConsumption[] }>;
     changeVouchers?: DbChangeVoucher[];
-    changeVoucherRedemptions?: Array<{ id: string; voucherId: string; kind: 'CASH' | 'ORDER'; amount: number; orderId?: string; operationId: string; status: 'APPLIED' | 'RELEASED'; denominations: Record<string, number>; userId?: string; createdAt: string }>;
+    changeVoucherRedemptions?: DbChangeVoucherRedemption[];
     orders: DbOrder[];
     inventory: DbInventoryItem[];
     cashRegister: Record<string, number>;
@@ -663,6 +692,47 @@ export class JsonDbAdapter implements DbAdapter {
     return true;
   }
 
+  async voucherOrdersAvailable(): Promise<boolean> { return true; }
+
+  async releaseOrphanVoucherRedemptions(code: string): Promise<number> {
+    await this.read();
+    const voucher = (this.data.changeVouchers ?? []).find((entry) => entry.code === code);
+    if (!voucher) return 0;
+    const cutoff = Date.now() - 10 * 60_000;
+    let released = 0;
+    for (const redemption of this.data.changeVoucherRedemptions ?? []) {
+      if (redemption.voucherId !== voucher.id || redemption.kind !== 'ORDER' || redemption.status !== 'APPLIED') continue;
+      if (Date.parse(redemption.createdAt) >= cutoff || this.data.orders.some((order) => order.id === redemption.orderId)) continue;
+      redemption.status = 'RELEASED';
+      voucher.balance = Math.round((voucher.balance + redemption.amount) * 100) / 100;
+      if (voucher.status === 'REDEEMED') voucher.status = 'ACTIVE';
+      released += redemption.amount;
+    }
+    if (released > 0) { voucher.updatedAt = new Date().toISOString(); await this.save(); }
+    return released;
+  }
+
+  async cancelChangeVoucher(input: { code: string; reason: string; userId: string }): Promise<boolean> {
+    await this.read();
+    if (input.reason.trim().length < 5) throw new Error('voucher_cancel_reason_required');
+    const voucher = (this.data.changeVouchers ?? []).find((entry) => entry.code === input.code);
+    if (!voucher) throw new Error('voucher_not_found');
+    if (voucher.status === 'CANCELLED') return false;
+    const reserved = (this.data.changeVoucherRedemptions ?? []).some((entry) => entry.voucherId === voucher.id && entry.kind === 'ORDER' && entry.status === 'APPLIED' && this.data.orders.some((order) => order.id === entry.orderId && order.status === 'PENDING_PAYMENT'));
+    if (reserved) throw new Error('voucher_reserved_by_pending_order');
+    if (voucher.status !== 'ACTIVE') throw new Error('voucher_not_active');
+    const now = new Date().toISOString();
+    Object.assign(voucher, { status: 'CANCELLED', cancelledReason: input.reason.trim(), cancelledBy: input.userId, cancelledAt: now, updatedAt: now });
+    await this.save();
+    return true;
+  }
+
+  async listChangeVouchers(): Promise<Array<DbChangeVoucher & { redemptions: DbChangeVoucherRedemption[] }>> {
+    await this.read();
+    const redemptions = this.data.changeVoucherRedemptions ?? [];
+    return (this.data.changeVouchers ?? []).map((voucher) => ({ ...voucher, redemptions: redemptions.filter((entry) => entry.voucherId === voucher.id).map((entry) => ({ ...entry })) })).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
   async releaseChangeVoucherForOrder(orderId: string): Promise<number> {
     await this.read();
     let released = 0;
@@ -672,7 +742,8 @@ export class JsonDbAdapter implements DbAdapter {
       const voucher = (this.data.changeVouchers ?? []).find((entry) => entry.id === redemption.voucherId);
       if (!voucher) continue;
       redemption.status = 'RELEASED';
-      Object.assign(voucher, { balance: Math.round((voucher.balance + redemption.amount) * 100) / 100, status: 'ACTIVE', updatedAt: now });
+      // Never resurrect a voucher an administrator cancelled.
+      Object.assign(voucher, { balance: Math.round((voucher.balance + redemption.amount) * 100) / 100, status: voucher.status === 'CANCELLED' ? 'CANCELLED' : 'ACTIVE', updatedAt: now });
       released += redemption.amount;
     }
     if (released > 0) await this.save();
@@ -738,7 +809,7 @@ export class JsonDbAdapter implements DbAdapter {
           this.data.cashRegister[denomination] -= count;
         }
       }
-      this.data.transactions.push({ id: this.data.transactions.length + 1, type: 'refund', amount: order.total, description: `Devolución de orden ${order.folio || order.id}: ${input.reason}`, denominations: input.cashDenominations || {}, created_at: now });
+      this.data.transactions.push({ id: this.data.transactions.length + 1, type: 'refund', amount: order.paymentMethod === 'cash' ? amountDue(order) : 0, description: `Devolución de orden ${order.folio || order.id}: ${input.reason}`, denominations: input.cashDenominations || {}, created_at: now });
       Object.assign(order, { status: 'REFUNDED', paymentStatus: 'REFUNDED', updatedAt: now });
       await this.save();
       return true;

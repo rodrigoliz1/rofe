@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import type { CartItem, Order, OrderStatus } from '../types';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { CashPaymentPanel } from './CashPaymentPanel';
+import { orderAmountDue } from '../utils/cash';
 import { VoucherPanel } from './VoucherPanel';
 import { apiFetch } from '../services/api';
 
@@ -192,7 +193,7 @@ export const BaristaView: React.FC<BaristaViewProps> = ({ orders, onUpdateOrderS
                       ))}
                     </div>
                     <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--accent-soft)' }}>
-                      ${order.total.toFixed(2)} · EFECTIVO
+                      ${orderAmountDue(order).toFixed(2)} · EFECTIVO{order.voucherAmount ? ' (resto con cupón)' : ''}
                     </div>
                     <button
                       className="order-action-btn btn-accept"

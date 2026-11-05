@@ -68,7 +68,7 @@ do $$ begin
   if confirm_order_payment('pg-qr-sale', 'pi_pg_test', '[{"ingredientId":"coffee_beans","quantity":18}]') then raise exception 'QR payment replay duplicated'; end if;
   if exists(select 1 from inventory_reservations where order_id = 'pg-qr-sale') then raise exception 'QR inventory reservation not released'; end if;
   if (select count(*) from cash_transactions where description like '%Q-PG-QR%') <> 1 then raise exception 'QR ledger duplicated'; end if;
-  if rofe_schema_version() <> 7 then raise exception 'voucher migration missing'; end if;
+  if rofe_schema_version() <> 8 then raise exception 'voucher ledger migration missing'; end if;
 end $$;
 insert into pickup_settings values (1, '{"enabled":false,"locationName":"ROFÉ"}');
 -- Change vouchers: cash payment with insufficient change issues one voucher; payout and order use are exactly-once.
@@ -117,5 +117,58 @@ begin
   exception when raise_exception then
     if SQLERRM <> 'voucher_not_active' then raise; end if;
   end;
+end $$;
+-- Migration 008: liability ledger — cancellation, orphan release, no resurrection, constraints.
+insert into orders (id, folio, operation_id, customer_name, items, total, status, payment_status, payment_method)
+values ('pg-v8-sale', 'R-PG-V8', 'b0000000-0000-4000-8000-000000000081', 'Postgres', '[]', 30, 'PENDING_PAYMENT', 'NOT_REQUIRED', 'cash');
+insert into orders (id, folio, customer_name, items, total, status, payment_status, payment_method)
+values ('pg-v8-pending', 'R-PG-V8P', 'Postgres', '[]', 20, 'PENDING_PAYMENT', 'PENDING', 'card');
+do $$
+begin
+  if not confirm_cash_payment_with_voucher('pg-v8-sale', 'cash-pg-v8-sale', '[]', 50, 0, '{"bill_50":1}', '{}', 'PGV8-AAAA-AA', 20, 'postgres-test') then raise exception 'v8 voucher not issued'; end if;
+  -- A voucher reserved by a pending order cannot be cancelled.
+  perform apply_change_voucher_to_order('PGV8-AAAA-AA', 'pg-v8-pending', 'c0000000-0000-4000-8000-000000000001', 10);
+  begin
+    perform cancel_change_voucher('PGV8-AAAA-AA', 'Cliente reportó pérdida', 'admin');
+    raise exception 'reserved voucher was cancelled';
+  exception when raise_exception then
+    if SQLERRM <> 'voucher_reserved_by_pending_order' then raise; end if;
+  end;
+  perform release_change_voucher_for_order('pg-v8-pending');
+  begin
+    perform cancel_change_voucher('PGV8-AAAA-AA', 'x', 'admin');
+    raise exception 'cancel without reason accepted';
+  exception when raise_exception then
+    if SQLERRM <> 'voucher_cancel_reason_required' then raise; end if;
+  end;
+  if not cancel_change_voucher('PGV8-AAAA-AA', 'Cliente reportó pérdida', 'admin') then raise exception 'voucher not cancelled'; end if;
+  if cancel_change_voucher('PGV8-AAAA-AA', 'Cliente reportó pérdida', 'admin') then raise exception 'voucher cancelled twice'; end if;
+  if (select status from change_vouchers where code = 'PGV8-AAAA-AA') <> 'CANCELLED' then raise exception 'voucher status not cancelled'; end if;
+  begin
+    perform apply_change_voucher_to_order('PGV8-AAAA-AA', 'pg-v8-pending', 'c0000000-0000-4000-8000-000000000002', 5);
+    raise exception 'cancelled voucher was used';
+  exception when raise_exception then
+    if SQLERRM <> 'voucher_not_active' then raise; end if;
+  end;
+  -- Orphan reservation (order never stored) older than 10 minutes is given back once.
+  insert into change_vouchers (code, amount, balance, created_by) values ('PGV8-BBBB-BB', 15, 0, 'postgres-test');
+  insert into change_voucher_redemptions (voucher_id, kind, amount, order_id, operation_id, created_at)
+  select id, 'ORDER', 15, 'never-stored-order', 'c0000000-0000-4000-8000-000000000003', now() - interval '11 minutes' from change_vouchers where code = 'PGV8-BBBB-BB';
+  update change_vouchers set status = 'REDEEMED' where code = 'PGV8-BBBB-BB';
+  if release_orphan_change_voucher_redemptions('PGV8-BBBB-BB') <> 15 then raise exception 'orphan not released'; end if;
+  if release_orphan_change_voucher_redemptions('PGV8-BBBB-BB') <> 0 then raise exception 'orphan released twice'; end if;
+  if (select balance from change_vouchers where code = 'PGV8-BBBB-BB') <> 15 or (select status from change_vouchers where code = 'PGV8-BBBB-BB') <> 'ACTIVE' then raise exception 'orphan balance not restored'; end if;
+  -- voucher_amount can never exceed the order total.
+  begin
+    update orders set voucher_amount = 999 where id = 'pg-v8-pending';
+    raise exception 'voucher_amount above total accepted';
+  exception when check_violation then null;
+  end;
+  -- Refund of a cash order part-paid with a voucher: the ledger records only the cash returned.
+  insert into orders (id, folio, operation_id, customer_name, items, total, voucher_amount, status, payment_status, payment_method)
+  values ('pg-v8-refund', 'R-PG-V8R', 'b0000000-0000-4000-8000-000000000089', 'Postgres', '[]', 45, 25, 'PAID', 'APPROVED', 'cash');
+  update cash_register set count = count + 1 where denomination = 'bill_20';
+  if not apply_order_refund('pg-v8-refund', 'c0000000-0000-4000-8000-000000000009', 'Prueba de devolución', 'admin', '{"bill_20": 1}'::jsonb) then raise exception 'refund not applied'; end if;
+  if (select amount from cash_transactions where type = 'refund' and description like 'Devolución de orden R-PG-V8R%') <> 20 then raise exception 'refund ledger amount is not the cash returned'; end if;
 end $$;
 rollback;

@@ -4,6 +4,7 @@ import { ApiError, ConnectionError, apiJson } from '../services/api';
 import { enqueueCashOrder, getDeviceCredentials } from '../services/offline';
 import { clearCheckout, readCheckout, saveCheckout, type CheckoutDraft } from '../services/checkout';
 import { createOperationId } from '../utils/id';
+import { orderAmountDue } from '../utils/cash';
 
 export type PaymentStep = 'name' | 'method' | 'discount' | 'connecting' | 'waiting' | 'success' | 'cash' | 'failed' | 'cancelled';
 export function useCheckout(cartItems: CartItem[], total: number, orders: Order[]) {
@@ -20,7 +21,7 @@ export function useCheckout(cartItems: CartItem[], total: number, orders: Order[
 
   const acceptOrder = (order: Order) => {
     setDraft((previous) => {
-      const next = { ...previous, order, total: order.total };
+      const next = { ...previous, order, total: orderAmountDue(order) };
       saveCheckout(next);
       return next;
     });

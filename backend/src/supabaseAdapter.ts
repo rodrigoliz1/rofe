@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import type { CashPaymentInput, DbChangeVoucher, DbPickupSettings } from './db';
+import type { CashPaymentInput, DbChangeVoucher, DbChangeVoucherRedemption, DbPickupSettings } from './db';
 import type { DbAdapter, DbInventoryItem, DbCashTransaction, DbBakeryBatch, DbOrder, DbInventoryConsumption, DbSupplier, DbPurchase, DbWasteRecord, DbInventoryMovement, DbCashSession, DbDailyClosure, DbProductionBatch } from './db';
 
 export class SupabaseDbAdapter implements DbAdapter {
@@ -98,6 +98,8 @@ export class SupabaseDbAdapter implements DbAdapter {
       discount_authorized_by: order.discountAuthorizedBy || null,
       tax: order.tax ?? 0,
       total: order.total,
+      // Only sent when used, so databases without migration 008 keep working for normal orders.
+      ...(order.voucherAmount ? { voucher_amount: order.voucherAmount } : {}),
       status: order.status,
       payment_status: order.paymentStatus || null,
       payment_method: order.paymentMethod,
@@ -150,6 +152,32 @@ export class SupabaseDbAdapter implements DbAdapter {
   private schemaVersion = 0;
 
   async vouchersAvailable(): Promise<boolean> { return this.schemaVersion >= 7; }
+
+  async voucherOrdersAvailable(): Promise<boolean> { return this.schemaVersion >= 8; }
+
+  async releaseOrphanVoucherRedemptions(code: string): Promise<number> {
+    if (this.schemaVersion < 8) return 0;
+    const { data, error } = await this.supabase.rpc('release_orphan_change_voucher_redemptions', { p_code: code });
+    if (error) throw new Error(error.message);
+    return Number(data);
+  }
+
+  async cancelChangeVoucher(input: { code: string; reason: string; userId: string }): Promise<boolean> {
+    if (this.schemaVersion < 8) throw new Error('vouchers_migration_missing');
+    const { data, error } = await this.supabase.rpc('cancel_change_voucher', { p_code: input.code, p_reason: input.reason, p_user_id: input.userId });
+    if (error) throw new Error(error.message);
+    return Boolean(data);
+  }
+
+  async listChangeVouchers(): Promise<Array<DbChangeVoucher & { redemptions: DbChangeVoucherRedemption[] }>> {
+    this.requireVouchers();
+    const vouchers = await this.readAll('change_vouchers');
+    const redemptions = await this.readAll('change_voucher_redemptions');
+    return vouchers.map((row) => ({
+      ...mapVoucher(row),
+      redemptions: redemptions.filter((entry) => entry.voucher_id === row.id).map((entry): DbChangeVoucherRedemption => ({ id: String(entry.id), voucherId: String(entry.voucher_id), kind: entry.kind, amount: Number(entry.amount), orderId: entry.order_id ?? undefined, operationId: String(entry.operation_id), status: entry.status, denominations: entry.denominations ?? {}, userId: entry.user_id ?? undefined, createdAt: String(entry.created_at) })),
+    })).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
 
   private requireVouchers() {
     if (this.schemaVersion < 7) throw new Error('vouchers_migration_missing');
@@ -581,7 +609,7 @@ function mapCashSession(row: Record<string, unknown>): DbCashSession {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapVoucher(row: Record<string, any>): DbChangeVoucher {
-  return { id: String(row.id), code: String(row.code), orderId: row.order_id ?? undefined, amount: Number(row.amount), balance: Number(row.balance), status: row.status, createdBy: row.created_by ?? undefined, createdAt: String(row.created_at), updatedAt: String(row.updated_at) };
+  return { id: String(row.id), code: String(row.code), orderId: row.order_id ?? undefined, amount: Number(row.amount), balance: Number(row.balance), status: row.status, createdBy: row.created_by ?? undefined, createdAt: String(row.created_at), updatedAt: String(row.updated_at), cancelledReason: row.cancelled_reason ?? undefined, cancelledBy: row.cancelled_by ?? undefined, cancelledAt: row.cancelled_at ?? undefined };
 }
 
 function mapOrder(row: Record<string, any>): DbOrder { return {
@@ -597,6 +625,7 @@ function mapOrder(row: Record<string, any>): DbOrder { return {
       items: row.items, // already jsonb
       subtotal: row.subtotal == null ? Number(row.total) : Number(row.subtotal),
       discount: row.discount == null ? 0 : Number(row.discount),
+      voucherAmount: row.voucher_amount == null ? 0 : Number(row.voucher_amount),
       discountType: row.discount_type || undefined,
       discountReason: row.discount_reason || undefined,
       discountAuthorizedBy: row.discount_authorized_by || undefined,

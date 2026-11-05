@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import QRCode from 'qrcode';
 import type { Order } from '../types';
 import { apiJson } from '../services/api';
-import { calculateBestPossibleChange, calculateOptimalChange, DENOM_VALUES } from '../utils/cash';
+import { calculateBestPossibleChange, calculateOptimalChange, DENOM_VALUES, orderAmountDue } from '../utils/cash';
 import '../styles/cash-panel.css';
 
 export interface ChangeVoucher { code: string; amount: number; balance: number; status: string; createdAt: string; qr: string }
@@ -44,7 +44,8 @@ export function CashPaymentPanel({ order, cashInventory, onPaid, onCancelled, on
   const [qrSvg, setQrSvg] = useState('');
 
   const receivedTotal = useMemo(() => Math.round(Object.entries(received).reduce((sum, [key, count]) => sum + (DENOM_VALUES[key] ?? 0) * count, 0) * 100) / 100, [received]);
-  const changeDue = Math.round((receivedTotal - order.total) * 100) / 100;
+  const due = orderAmountDue(order);
+  const changeDue = Math.round((receivedTotal - due) * 100) / 100;
   // Change is paid from the drawer plus the bills just received.
   const available = useMemo(() => Object.fromEntries(DENOMINATIONS.map((key) => [key, (cashInventory[key] || 0) + (received[key] || 0)])), [cashInventory, received]);
   const best = useMemo(() => changeDue > 0 ? calculateBestPossibleChange(changeDue, available) : { amount: 0, changeBreakdown: {} }, [changeDue, available]);
@@ -76,7 +77,7 @@ export function CashPaymentPanel({ order, cashInventory, onPaid, onCancelled, on
 
   const charge = () => {
     if (busy) return;
-    if (receivedTotal <= 0 && order.total > 0) { setError('Toca los billetes y monedas que entregó el cliente.'); return; }
+    if (receivedTotal <= 0 && due > 0) { setError('Toca los billetes y monedas que entregó el cliente.'); return; }
     if (changeDue < 0) { setError(`Faltan ${money(-changeDue)} MXN`); return; }
     const exact = calculateOptimalChange(changeDue, available);
     if (exact.success) { void pay(0, exact.changeBreakdown, changeDue); return; }
@@ -124,10 +125,11 @@ export function CashPaymentPanel({ order, cashInventory, onPaid, onCancelled, on
 
   return <section className="cash-panel" aria-label="Pago en efectivo">
     <div className="cash-panel-summary" aria-live="polite">
-      <div><span>Total</span><strong>{money(order.total)}</strong></div>
+      <div><span>{order.voucherAmount ? 'Por cobrar' : 'Total'}</span><strong>{money(due)}</strong></div>
       <div><span>Recibido</span><strong data-testid="cash-received">{money(receivedTotal)}</strong></div>
       <div className={changeDue < 0 ? 'is-missing' : ''}><span>{changeDue < 0 ? 'Falta' : 'Cambio'}</span><strong data-testid="cash-change">{money(Math.abs(changeDue))}</strong></div>
     </div>
+    {Boolean(order.voucherAmount) && <p className="cash-panel-hint">Total {money(order.total)} · pagado con cupón {money(order.voucherAmount ?? 0)}</p>}
     {error && <p className="inline-feedback error" role="alert">{error}</p>}
     <div className="cash-panel-actions">
       <button type="button" className="btn btn-primary" disabled={busy} onClick={charge}>{busy ? 'Cobrando…' : 'Cobrar'}</button>

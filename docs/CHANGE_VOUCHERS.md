@@ -30,7 +30,27 @@ El código acepta minúsculas y no exige guiones; las letras O, I y L se interpr
 - **Seguridad**: los códigos tienen unos 50 bits aleatorios. Consultarlos exige sesión (terminal o personal) y tiene límite de intentos (30 fallos cada 15 min). Cada emisión, cancelación y pago queda en la auditoría.
 - Un cupón no se combina con un descuento autorizado por gerente.
 
+## Tratamiento contable (auditoría)
+
+- **Un cupón es un pasivo, no un descuento.** Al emitirlo, ROFÉ debe ese dinero al cliente. Al usarlo, se paga parte del pedido: el pedido conserva su `total` (venta bruta completa) y `voucher_amount` guarda la parte liquidada con el cupón. `discount` no cambia.
+- Lo que se cobra por Point o en efectivo, y lo que se devuelve en un reembolso, es `total − voucher_amount`. El reporte separa `voucherSettled`, lo liquidado con cupones.
+- **Reembolso** de un pedido pagado en parte con cupón: se devuelve en efectivo solo la parte cobrada en efectivo, y el saldo vuelve al cupón, una sola vez. El movimiento de caja registra el efectivo que realmente sale del cajón; un reembolso con tarjeta registra $0 en caja.
+- **Corte de caja**: `expectedCash` es solo efectivo físico. La respuesta añade `vouchers`, con lo emitido, lo pagado en efectivo, lo aplicado a pedidos, lo cancelado, el pasivo vigente y lo reservado en pedidos pendientes.
+- **Tratamiento fiscal**: se recomienda que el contador confirme el tratamiento del cupón (anticipo o saldo a favor del cliente) y decida si debe tener vigencia. Hoy no caduca.
+
+## Controles del backend (independientes de la pantalla)
+
+- El backend vuelve a validar la cuenta: recibido − cambio − cupón = por cobrar, en centavos exactos.
+- Solo emite un cupón por el cambio que realmente no se puede dar con lo que hay en el cajón más lo recibido (`bestPossibleChange`). Si sí se puede dar, responde `VOUCHER_NOT_NEEDED`.
+- El pago en efectivo exige el saldo exacto y que las denominaciones estén en el cajón.
+- Las funciones de Postgres bloquean la fila del cupón (`FOR UPDATE`). Las pruebas lanzan 12 usos en paralelo y solo uno gana.
+- Las reservas huérfanas, cuyo pedido nunca se guardó, se liberan a los 10 minutos.
+- La sincronización offline rechaza cupones (`OFFLINE_VOUCHER_NOT_ALLOWED`).
+- **Permisos**: la terminal kiosco solo consulta y aplica cupones en su propio pedido. El cobro en efectivo y el pago de cupones son para el personal de caja. El historial y la cancelación son solo para ADMIN y MANAGER, y la cancelación exige un motivo y queda auditada. Un cupón reservado por un pedido pendiente no se puede cancelar.
+- **Historial**: Admin → Finanzas → «Cupones de cambio».
+
 ## Despliegue
 
 1. Aplica `backend/migrations/007_change_vouchers.sql` en Supabase (SQL Editor). Crea dos tablas y cuatro funciones; no modifica datos existentes.
-2. Despliega. Sin la migración, el resto de ROFÉ sigue funcionando y los cupones responden «falta la migración 007».
+2. Aplica `backend/migrations/008_voucher_ledger.sql`. Agrega `orders.voucher_amount`, los campos de cancelación y las funciones de cancelación y liberación, y corrige el monto del reembolso en caja. No borra datos.
+3. Despliega. Sin la 007, los cupones responden «falta la migración». Sin la 008, se pueden emitir y pagar cupones en efectivo, pero usarlos en pedidos responde 503.

@@ -1,3 +1,4 @@
+import { AdminVouchersPanel } from './AdminVouchersPanel';
 import React, { useState, useEffect } from 'react';
 import type { Product } from '../types';
 import { ProductEditorModal } from './ProductEditorModal';
@@ -67,7 +68,7 @@ const DENOM_VALUES: Record<string, number> = {
   coin_5: 5, coin_2: 2, coin_1: 1, coin_0_50: 0.5, coin_0_20: 0.2,
 };
 
-type TabId = 'dashboard' | 'products' | 'cash' | 'costs' | 'raw_inventory' | 'operations' | 'production' | 'reports' | 'access' | 'closure' | 'terminal' | 'pickup';
+type TabId = 'dashboard' | 'products' | 'cash' | 'costs' | 'raw_inventory' | 'operations' | 'production' | 'reports' | 'access' | 'closure' | 'terminal' | 'pickup' | 'vouchers';
 
 const TABS: { id: TabId; icon: UiIconName; label: string; section: string }[] = [
   { id: 'dashboard', icon: 'grid', label: 'Dashboard', section: 'Principal' },
@@ -75,6 +76,7 @@ const TABS: { id: TabId; icon: UiIconName; label: string; section: string }[] = 
   { id: 'cash', icon: 'cash', label: 'Caja', section: 'Finanzas' },
   { id: 'costs', icon: 'chart', label: 'Costos', section: 'Finanzas' },
   { id: 'closure', icon: 'lock', label: 'Cortes', section: 'Finanzas' },
+  { id: 'vouchers', icon: 'qr', label: 'Cupones de cambio', section: 'Finanzas' },
   { id: 'reports', icon: 'chart', label: 'Reportes', section: 'Finanzas' },
   { id: 'raw_inventory', icon: 'box', label: 'Inventario', section: 'Operaciones' },
   { id: 'operations', icon: 'refresh', label: 'Abastecimiento', section: 'Operaciones' },
@@ -632,6 +634,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ products, onClose, onInven
         )}
 
         {/* ===== REPORTS ===== */}
+        {activeTab === 'vouchers' && <><header><h2>Cupones de cambio</h2><p>Saldos a favor de clientes: obligación pendiente de ROFÉ, no descuentos.</p></header><div className="admin-content-body"><AdminVouchersPanel /></div></>}
         {activeTab === 'pickup' && <><header><h2>Pedidos QR · Pickup</h2><p>Tu menú en el celular del cliente, con pago en Stripe y recogida en barra.</p></header><div className="admin-content-body"><PickupAdminPanel /></div></>}
         {activeTab === 'reports' && (
           <><header><h2>Reportes</h2><p>Analiza ventas, costos, rentabilidad y actividad operativa.</p></header><div className="admin-content-body"><ReportsPanel /></div></>

@@ -58,3 +58,6 @@ export function calculateBestPossibleChange(changeDue: number, availableCoins: R
   }
   return { amount: best / 100, changeBreakdown };
 }
+
+/** What is still to be collected after change vouchers (the order total stays the full price). */
+export const orderAmountDue = (order: { total: number; voucherAmount?: number }) => Math.round((order.total - (order.voucherAmount ?? 0)) * 100) / 100;

@@ -4,12 +4,11 @@ import { calculateOptimalChange, DENOM_VALUES } from '../utils/cash';
 import { createOperationId } from '../utils/id';
 import type { ChangeVoucher } from './CashPaymentPanel';
 import '../styles/cash-panel.css';
+import { voucherCodeFromScan } from '../utils/voucher';
 
 const money = (value: number) => `$${value.toFixed(2)}`;
 const STATUS: Record<string, string> = { ACTIVE: 'Vigente', REDEEMED: 'Ya utilizado', CANCELLED: 'Cancelado' };
 
-/** Extracts the code from a QR ("ROFE-VALE:XXXX-XXXX-XX") or what the customer reads aloud. */
-const voucherCodeFromScan = (value: string) => value.trim().replace(/^ROFE[-:\s]?VALE[-:\s]?/i, '');
 
 /**
  * Barista: look up a change voucher by code or QR and pay its balance in cash when the

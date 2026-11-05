@@ -61,6 +61,8 @@ export interface Order {
   createdAt: string;
   customerName?: string;
   paymentMethod: 'card' | 'cash';
+  /** Part of the total already paid with change vouchers. */
+  voucherAmount?: number;
   paymentId?: string;
   paymentIntentId?: string;
   notes?: string;

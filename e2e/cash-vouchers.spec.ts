@@ -22,7 +22,7 @@ async function deviceHeaders(request: APIRequestContext, name: string) {
 async function cashOrder(request: APIRequestContext, headers: Record<string, string>, productId: string, extra: Record<string, unknown> = {}) {
   const response = await request.post(`${API}/api/orders`, { headers, data: { operationId: crypto.randomUUID(), customerName: 'Cliente cupón', paymentMethod: 'cash', items: [{ productId, quantity: 1 }], ...extra } });
   expect(response.status(), await response.text()).toBe(201);
-  return (await response.json()).order as { id: string; total: number; discount?: number };
+  return (await response.json()).order as { id: string; total: number; discount?: number; voucherAmount?: number };
 }
 
 /** Leaves the shared backend as other specs expect it: no open cash session, KDS queue clear. */
@@ -107,9 +107,10 @@ test('insufficient change issues a voucher that can be used, released and paid o
   expect((await request.get(`${API}/api/vouchers/${code.replaceAll('-', '').toLowerCase()}`, { headers: device })).status()).toBe(200);
   expect((await request.get(`${API}/api/vouchers/ZZZZ-ZZZZ-ZZ`, { headers: device })).status()).toBe(404);
 
-  // The customer uses it on a new order: $25 off a $45 croissant.
+  // The customer uses it on a new order: $25 of a $45 croissant paid with the voucher.
+  // Revenue stays $45 (a liability is settled, not a discount); $20 is still due.
   const withVoucher = await cashOrder(request, device, 'croissant-mantequilla', { voucherCode: code });
-  expect(withVoucher).toMatchObject({ total: 20, discount: 25 });
+  expect(withVoucher).toMatchObject({ total: 45, discount: 0, voucherAmount: 25 });
   expect(await lookup()).toMatchObject({ balance: 0, status: 'REDEEMED' });
   expect((await request.post(`${API}/api/orders`, { headers: device, data: { operationId: crypto.randomUUID(), paymentMethod: 'cash', items: [{ productId: 'espresso', quantity: 1 }], voucherCode: code } })).status()).toBe(409);
   // That order is cancelled (customer changed their mind): the balance comes back once.
