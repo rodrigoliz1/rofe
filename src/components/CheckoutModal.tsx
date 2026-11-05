@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { CartItem, Order } from '../types';
 import { apiJson } from '../services/api';
 import { clearCheckout } from '../services/checkout';
@@ -7,14 +7,20 @@ import { useDialogFocus } from '../hooks/useDialogFocus';
 import { UiIcon } from './UiIcon';
 import { PaymentOutcomeIcon } from './PaymentOutcomeIcon';
 import { usePaymentFeedback } from '../hooks/usePaymentFeedback';
+import { useBackHandler } from '../kiosk/backStack';
+import { vibrate } from '../kiosk/nativeBridge';
 
 interface CheckoutModalProps {
   total: number; cartItems: CartItem[]; orders: Order[];
   onPaymentSuccess: (orderId: string, customerName: string) => void;
   onClose: () => void;
+  /** Self-service terminal: no staff discount, automatic return to the welcome screen. */
+  kiosk?: { confirmationSeconds: number; haptics: boolean };
+  /** True while a payment is in flight and the session must not be reset by inactivity. */
+  onLockChange?: (locked: boolean) => void;
 }
 
-export function CheckoutModal({ total, cartItems, orders, onPaymentSuccess, onClose }: CheckoutModalProps) {
+export function CheckoutModal({ total, cartItems, orders, onPaymentSuccess, onClose, kiosk, onLockChange }: CheckoutModalProps) {
   const payment = useCheckout(cartItems, total, orders);
   const { draft, setDraft, step, setStep, error, setError, busy, offline } = payment;
   const outcome = step === 'success' || step === 'cash' ? 'success' : step === 'failed' ? 'failure' : null;
@@ -30,6 +36,23 @@ export function CheckoutModal({ total, cartItems, orders, onPaymentSuccess, onCl
   const amount = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(draft.total);
   const folio = draft.order?.folio ?? `R-${draft.operationId.replaceAll('-', '').slice(0, 10).toUpperCase()}`;
   const finish = () => { clearCheckout(); onPaymentSuccess(draft.order?.id ?? draft.operationId, draft.customerName); };
+  const completed = step === 'success' || step === 'cash';
+  const locked = draft.submitted && step !== 'cancelled' && !completed;
+  useEffect(() => { onLockChange?.(locked); }, [locked, onLockChange]);
+  useEffect(() => () => onLockChange?.(false), [onLockChange]);
+  // Back closes the dialog only when no payment is in flight; otherwise it is ignored.
+  useBackHandler(true, () => { if (safeToClose) onClose(); else if (completed && kiosk) finish(); return true; });
+  const [remaining, setRemaining] = useState<number | null>(null);
+  useEffect(() => {
+    if (!kiosk || !completed) { setRemaining(null); return; }
+    vibrate([40, 60, 40], kiosk.haptics);
+    const deadline = Date.now() + kiosk.confirmationSeconds * 1000;
+    setRemaining(kiosk.confirmationSeconds);
+    const timer = window.setInterval(() => setRemaining(Math.max(0, Math.ceil((deadline - Date.now()) / 1000))), 250);
+    return () => window.clearInterval(timer);
+  }, [kiosk, completed]);
+  const finishedRef = useRef(false);
+  useEffect(() => { if (remaining === 0 && !finishedRef.current) { finishedRef.current = true; finish(); } });
   const authorizeDiscount = async (event: FormEvent) => {
     event.preventDefault(); if (authorizing) return;
     setAuthorizing(true); setError('');
@@ -51,7 +74,7 @@ export function CheckoutModal({ total, cartItems, orders, onPaymentSuccess, onCl
         <h2 id="checkout-title">¿A nombre de quién?</h2>
         <p className="checkout-step-text">Te llamaremos cuando tu pedido esté listo.</p>
         <label htmlFor="customer-name">Tu nombre</label>
-        <input id="customer-name" className="name-input" placeholder="Ingresa tu nombre..." value={draft.customerName} onChange={(event) => setDraft({ ...draft, customerName: event.target.value })} maxLength={24} required autoComplete="given-name" autoFocus />
+        <input id="customer-name" className="name-input" placeholder="Ingresa tu nombre..." value={draft.customerName} onChange={(event) => setDraft({ ...draft, customerName: event.target.value })} maxLength={24} required autoComplete={kiosk ? 'off' : 'given-name'} autoCapitalize="words" spellCheck={false} enterKeyHint="next" autoFocus />
         <button className="confirm-name-btn" type="submit" disabled={!draft.customerName.trim()}>CONTINUAR</button>
       </form>}
       {step === 'method' && <div className="checkout-step-content width-100">
@@ -66,7 +89,7 @@ export function CheckoutModal({ total, cartItems, orders, onPaymentSuccess, onCl
           </button>
         </div>
         {!navigator.onLine && <p className="payment-notice">Sin internet: sólo podemos guardar pedidos en efectivo.</p>}
-        <button type="button" className="checkout-secondary-action" onClick={() => { setError(''); setStep('discount'); }}>{payment.discountToken ? 'Descuento autorizado' : 'Aplicar descuento con autorización'}</button>
+        {!kiosk && <button type="button" className="checkout-secondary-action" onClick={() => { setError(''); setStep('discount'); }}>{payment.discountToken ? 'Descuento autorizado' : 'Aplicar descuento con autorización'}</button>}
         <button type="button" className="checkout-secondary-action" onClick={() => setStep('name')}>Cambiar nombre</button>
       </div>}
       {step === 'discount' && <form onSubmit={authorizeDiscount} className="name-form">
@@ -97,6 +120,7 @@ export function CheckoutModal({ total, cartItems, orders, onPaymentSuccess, onCl
         <p className="checkout-step-text">{step === 'success' ? `Gracias, ${draft.customerName}. Tu pedido pasa a preparación.` : offline ? 'Guardado en este dispositivo. Se enviará al recuperar internet; avisa al equipo antes de pagar.' : 'Acércate al mostrador para pagar en efectivo.'}</p>
         <div className="order-ticket"><p className="ticket-label">TU NÚMERO DE PEDIDO</p><h3 className="ticket-folio">{folio}</h3><p className="ticket-client-name">{draft.customerName}</p><div className="ticket-dash" /><strong>{step === 'cash' ? 'Por pagar: ' : 'Pagado: '}{amount} MXN</strong><p className="ticket-footer">Puedes tomar una foto de este comprobante.</p></div>
         <button className="done-btn" onClick={finish}>{step === 'cash' ? 'Listo, tomé foto' : 'Entendido'}</button>
+        {remaining !== null && <p className="kiosk-auto-reset" aria-live="off">Volvemos al inicio en {remaining} s</p>}
         {feedback.soundBlocked && <button type="button" className="payment-sound-replay" onClick={feedback.replaySound}>Escuchar sonido</button>}
       </div>}
       {step === 'failed' && <div className="checkout-step-content width-100 payment-outcome-content" role="status"><PaymentOutcomeIcon outcome="failure" /><h2 id="checkout-title">No pudimos completar el pago</h2><p className="checkout-step-text">Tu pedido sigue disponible. Revisa este intento antes de iniciar un nuevo cobro.</p><button className="btn btn-primary" disabled={busy} onClick={() => void payment.submit()}>Reintentar el mismo pedido</button><button className="checkout-secondary-action" disabled={busy} onClick={() => void payment.cancel()}>Cerrar intento de pago</button>{feedback.soundBlocked && <button type="button" className="payment-sound-replay" onClick={feedback.replaySound}>Escuchar sonido</button>}</div>}

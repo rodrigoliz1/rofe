@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import type { CartItem, Order, OrderStatus, Product } from './types';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { Catalog } from './components/Catalog';
@@ -14,6 +14,10 @@ import { useOutbox } from './hooks/useOutbox';
 import { readCheckout } from './services/checkout';
 import { UiIcon } from './components/UiIcon';
 import { subscribeToEvents } from './services/events';
+import { KioskTerminal } from './kiosk/KioskTerminal';
+import { parseKioskSettings } from './kiosk/config';
+import { clearKioskSession, readKioskSession, saveKioskSession, type KioskCategory } from './kiosk/session';
+import { KIOSK_RESET_EVENT, KIOSK_STAFF_EVENT } from './kiosk/events';
 
 const BaristaView = lazy(() => import('./components/BaristaView').then((module) => ({ default: module.BaristaView })));
 const AdminView = lazy(() => import('./components/AdminView').then((module) => ({ default: module.AdminView })));
@@ -24,10 +28,14 @@ type DeviceState = 'loading' | 'setup' | 'ready' | 'restore-error';
 interface RofeEvent { type: string; orderId?: string; order?: Order }
 
 function App({ kiosk = false }: { kiosk?: boolean }) {
+  const kioskSettings = useMemo(() => parseKioskSettings(window.location.search), []);
+  // A kiosk reload (renderer crash, admin reload) restores the current customer's order,
+  // but never one older than the inactivity timeout.
+  const [restoredKiosk] = useState(() => kiosk ? readKioskSession(kioskSettings.idleSeconds * 1000) : null);
   const [deviceState, setDeviceState] = useState<DeviceState>('loading');
-  const [started, setStarted] = useState(() => Boolean(readCheckout()));
-  const [selectedCategory, setSelectedCategory] = useState<'all' | 'coffee' | 'cold' | 'bakery'>('all');
-  const [cart, setCart] = useState<CartItem[]>(() => readCheckout()?.cartItems ?? []);
+  const [started, setStarted] = useState(() => Boolean(readCheckout()) || Boolean(restoredKiosk?.started));
+  const [selectedCategory, setSelectedCategory] = useState<KioskCategory>(() => restoredKiosk?.category ?? 'all');
+  const [cart, setCart] = useState<CartItem[]>(() => readCheckout()?.cartItems ?? restoredKiosk?.cart ?? []);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [productCatalog, setProductCatalog] = useState<Product[]>([]);
   const [showCheckout, setShowCheckout] = useState(() => Boolean(readCheckout()));
@@ -118,6 +126,25 @@ function App({ kiosk = false }: { kiosk?: boolean }) {
     if (viewMode !== 'client') void loadOrders().catch((cause: unknown) => setAppError(cause instanceof Error ? cause.message : 'No pudimos cargar los pedidos.'));
   }, [loadOrders, viewMode]);
 
+  useEffect(() => {
+    if (kiosk) saveKioskSession({ started, cart, category: selectedCategory });
+  }, [kiosk, started, cart, selectedCategory]);
+
+  // One customer, one session: nothing of the previous order survives.
+  const resetKioskSession = useCallback(() => {
+    setCart([]); setSelectedProduct(null); setShowCheckout(false); setSelectedCategory('all'); setStarted(false);
+    clearKioskSession();
+  }, []);
+
+  useEffect(() => {
+    if (!kiosk) return;
+    const reset = () => resetKioskSession();
+    const staff = () => setShowPasswordPrompt(true);
+    window.addEventListener(KIOSK_RESET_EVENT, reset);
+    window.addEventListener(KIOSK_STAFF_EVENT, staff);
+    return () => { window.removeEventListener(KIOSK_RESET_EVENT, reset); window.removeEventListener(KIOSK_STAFF_EVENT, staff); };
+  }, [kiosk, resetKioskSession]);
+
   const handleAddToCart = (item: CartItem) => {
     setCart((current) => {
       const index = current.findIndex((candidate) => candidate.id === item.id);
@@ -168,15 +195,31 @@ function App({ kiosk = false }: { kiosk?: boolean }) {
   return (
     <div className="app-container">
       <a className="skip-link" href="#main-content">Saltar al contenido</a>
-      <ConnectionStatus online={online} realtime={realtime} pending={outbox.pending} error={outbox.error} onRetry={() => void outbox.retry()} />
-      {appError && <div className="app-alert" role="alert">{appError}<button onClick={() => void loadProducts()}>Reintentar</button><button onClick={() => setAppError('')} aria-label="Cerrar mensaje">×</button></div>}
+      {!(kiosk && viewMode === 'client') && <ConnectionStatus online={online} realtime={realtime} pending={outbox.pending} error={outbox.error} onRetry={() => void outbox.retry()} />}
+      {appError && !(kiosk && viewMode === 'client') && <div className="app-alert" role="alert">{appError}<button onClick={() => void loadProducts()}>Reintentar</button><button onClick={() => setAppError('')} aria-label="Cerrar mensaje">×</button></div>}
 
       <Suspense fallback={<main className="app-loading"><span>Abriendo módulo…</span></main>}>
         {viewMode === 'barista' && <BaristaView orders={orders} onUpdateOrderStatus={updateOrderStatus} onClose={() => void closeStaffView()} />}
         {viewMode === 'admin' && <AdminView products={productCatalog} onClose={() => void closeStaffView()} onInventoryUpdate={loadProducts} onOpenBarista={() => setViewMode('barista')} />}
       </Suspense>
 
-      {viewMode === 'client' && <main id="main-content">
+      {viewMode === 'client' && kiosk && <main id="main-content" className="kiosk-main-content">
+        <KioskTerminal
+          settings={kioskSettings}
+          products={productCatalog} catalogLoading={catalogLoading} onRetryCatalog={() => void loadProducts()}
+          started={started} onStart={() => setStarted(true)}
+          cart={cart} onAddToCart={handleAddToCart} onUpdateQty={updateQuantity} onRemoveItem={(id) => setCart((current) => current.filter((item) => item.id !== id))}
+          category={selectedCategory} onSelectCategory={setSelectedCategory}
+          selectedProduct={selectedProduct} onSelectProduct={setSelectedProduct}
+          showCheckout={showCheckout} onOpenCheckout={() => setShowCheckout(true)} onCloseCheckout={() => setShowCheckout(false)}
+          orders={orders} onResetSession={resetKioskSession} onStaffAccess={() => setShowPasswordPrompt(true)}
+          connection={{ online, realtime, pending: outbox.pending, error: outbox.error, onRetry: () => void outbox.retry() }}
+          appError={appError} onDismissError={() => setAppError('')}
+        />
+        {showPasswordPrompt && <PasswordPromptModal onClose={() => setShowPasswordPrompt(false)} onSuccess={(mode) => { setViewMode(mode); setShowPasswordPrompt(false); }} />}
+      </main>}
+
+      {viewMode === 'client' && !kiosk && <main id="main-content">
         {!started && <WelcomeScreen onStart={() => setStarted(true)} onAdminClick={() => setShowPasswordPrompt(true)} />}
         {started && <>
           <header className="pos-toolbar"><button className="pos-brand" onClick={() => setStarted(false)} aria-label="Volver al inicio">ROFÉ<span>.</span></button><span className="pos-toolbar-label">Espresso bar · Hazlo a tu gusto</span><button className="toolbar-action" title="Panel Barista" onClick={() => setShowPasswordPrompt(true)}><UiIcon name="users" />Equipo</button></header>

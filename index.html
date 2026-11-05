@@ -10,6 +10,13 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <script>
+      // The self-service terminal locks scale before first paint (see src/kiosk/guards.ts).
+      if (/^\/kiosk\/?$/.test(location.pathname)) {
+        document.querySelector('meta[name="viewport"]').content = 'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content';
+        document.documentElement.classList.add('kiosk-mode');
+      }
+    </script>
     <title>ROFÉ · Espresso Bar</title>
   </head>
   <body>

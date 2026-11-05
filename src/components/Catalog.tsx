@@ -8,9 +8,10 @@ interface ProductCardImageProps {
   src: string;
   alt: string;
   icon: string;
+  priority?: boolean;
 }
 
-const ProductCardImage: React.FC<ProductCardImageProps> = ({ src, alt, icon }) => {
+const ProductCardImage: React.FC<ProductCardImageProps> = ({ src, alt, icon, priority = false }) => {
   const [hasError, setHasError] = useState(false);
 
   if (hasError || !src) {
@@ -27,7 +28,12 @@ const ProductCardImage: React.FC<ProductCardImageProps> = ({ src, alt, icon }) =
         src={src.startsWith('/api/') ? apiUrl(src) : src}
         alt={alt}
         className="product-card-image"
-        loading="lazy"
+        width={480}
+        height={360}
+        decoding="async"
+        loading={priority ? 'eager' : 'lazy'}
+        fetchPriority={priority ? 'high' : 'auto'}
+        draggable={false}
         onError={() => setHasError(true)}
       />
     </div>
@@ -41,6 +47,10 @@ interface CatalogProps {
   selectedCategory: string;
   onSelectCategory: (category: 'all' | 'coffee' | 'cold' | 'bakery') => void;
   onProductClick: (product: Product) => void;
+  /** The self-service kiosk hides free-text search to avoid the keyboard. */
+  showSearch?: boolean;
+  /** Images of the first N visible products load eagerly; the rest stay lazy. */
+  priorityImages?: number;
 }
 
 export const Catalog: React.FC<CatalogProps> = ({
@@ -48,6 +58,8 @@ export const Catalog: React.FC<CatalogProps> = ({
   selectedCategory,
   onSelectCategory,
   onProductClick,
+  showSearch = true,
+  priorityImages = 0,
 }) => {
   const [search, setSearch] = useState('');
   const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
@@ -56,7 +68,7 @@ export const Catalog: React.FC<CatalogProps> = ({
   return (
     <div className="catalog-container">
       <div className="catalog-header">
-        <div className="catalog-heading"><div><h2 className="catalog-title">MENÚ</h2><p>Tu pausa empieza aquí.</p></div><label className="catalog-search"><UiIcon name="search" /><span className="sr-only">Buscar en el menú</span><input type="search" placeholder="Buscar tu favorito" value={search} onChange={(event) => setSearch(event.target.value)} /></label></div>
+        <div className="catalog-heading"><div><h2 className="catalog-title">MENÚ</h2><p>Tu pausa empieza aquí.</p></div>{showSearch && <label className="catalog-search"><UiIcon name="search" /><span className="sr-only">Buscar en el menú</span><input type="search" placeholder="Buscar tu favorito" value={search} onChange={(event) => setSearch(event.target.value)} /></label>}</div>
         <div className="categories-tabs">
           {(['all', 'coffee', 'cold', 'bakery'] as const).map((cat) => (
             <button
@@ -77,7 +89,7 @@ export const Catalog: React.FC<CatalogProps> = ({
       <div className="products-grid" aria-busy={loading}>
         {loading && <p className="catalog-empty" role="status">Preparando el menú…</p>}
         {!loading && filteredProducts.length === 0 && <div className="catalog-empty"><UiIcon name="coffee" size={40} /><h3>{products.length ? 'No encontramos ese antojo' : 'El menú aún no está disponible'}</h3><p>{products.length ? 'Prueba otro nombre o cambia de categoría.' : 'Revisa la conexión para cargar los productos.'}</p><button className="btn btn-secondary" onClick={products.length ? () => { setSearch(''); onSelectCategory('all'); } : onRetry}>{products.length ? 'Ver todo el menú' : 'Volver a cargar'}</button></div>}
-        {filteredProducts.map((product) => {
+        {filteredProducts.map((product, index) => {
           const isDepleted = product.stock !== undefined && product.stock <= 0;
           return (
             <button
@@ -91,7 +103,7 @@ export const Catalog: React.FC<CatalogProps> = ({
                 }
               }}
             >
-              <ProductCardImage src={product.image || ''} alt={product.name} icon={product.icon} />
+              <ProductCardImage src={product.image || ''} alt={product.name} icon={product.icon} priority={index < priorityImages} />
               {isDepleted && <div className="depleted-badge">AGOTADO</div>}
               <div className="product-card-info">
                 <h3 className="product-card-name">{product.name}</h3>

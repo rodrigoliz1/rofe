@@ -21,7 +21,7 @@ const start = rootUrl(manifest.start_url, 'start_url');
 const scope = rootUrl(manifest.scope, 'scope');
 assert(start.pathname.startsWith(scope.pathname), 'start_url está fuera del scope');
 assert(['standalone', 'fullscreen'].includes(manifest.display), 'display abre controles del navegador');
-assert.equal(manifest.orientation, 'landscape');
+assert.equal(manifest.orientation, 'any'); // The kiosk supports portrait and landscape.
 assert(/^#[a-f\d]{6}$/i.test(manifest.theme_color) && /^#[a-f\d]{6}$/i.test(manifest.background_color), 'Colores inválidos');
 assert.notEqual(manifest.prefer_related_applications, true);
 const icons = [];

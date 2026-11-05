@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import type { Product, CustomizationOptions, CartItem } from '../types';
 import { configuredItemId } from '../utils/cart';
 import { useDialogFocus } from '../hooks/useDialogFocus';
+import { useBackHandler } from '../kiosk/backStack';
 import { ProductIcon } from './Icons';
 
 interface ProductModalProps {
@@ -24,6 +25,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   onAddToCart,
 }) => {
   const dialogRef = useDialogFocus(onClose);
+  useBackHandler(true, () => { onClose(); return true; });
   const [customization, setCustomization] = useState<CustomizationOptions>({
     ...DEFAULT_CUSTOMIZATION,
     // Set default milk for milk-based coffees automatically

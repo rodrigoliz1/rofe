@@ -5,7 +5,7 @@ test('production manifest and installation resources have valid responses', asyn
   expect(response.status()).toBe(200);
   expect(response.headers()['content-type']).toContain('application/manifest+json');
   const manifest = await response.json();
-  expect(manifest).toMatchObject({ id: '/', start_url: '/kiosk', scope: '/', display: 'standalone', orientation: 'landscape', prefer_related_applications: false });
+  expect(manifest).toMatchObject({ id: '/', start_url: '/kiosk', scope: '/', display: 'standalone', orientation: 'any', prefer_related_applications: false });
   expect(JSON.stringify(manifest)).not.toMatch(/localhost|127\.0\.0\.1|192\.168\.|:5173/);
   for (const icon of manifest.icons as Array<{ src: string; sizes: string; type: string; purpose: string }>) {
     const asset = await request.get(icon.src, { maxRedirects: 0 });
