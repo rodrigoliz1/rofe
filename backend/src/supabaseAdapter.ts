@@ -43,6 +43,12 @@ export class SupabaseDbAdapter implements DbAdapter {
     return data.map(mapOrder);
   }
 
+  async getOrdersUpdatedSince(sinceIso: string): Promise<DbOrder[]> {
+    const { data, error } = await this.supabase.from('orders').select('*').gte('updated_at', sinceIso).order('updated_at', { ascending: false }).limit(500);
+    if (error) throw error;
+    return data.map(mapOrder);
+  }
+
   async getOrderById(id: string): Promise<DbOrder | undefined> {
     const { data, error } = await this.supabase.from('orders').select('*').eq('id', id).maybeSingle();
     if (error) throw error;

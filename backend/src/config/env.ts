@@ -33,6 +33,9 @@ const envSchema = z.object({
   ENABLE_PAYMENT_SIMULATION: booleanFromString,
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   TRUST_PROXY: z.coerce.number().int().min(0).max(3).default(1),
+  // Serverless SSE: close streams before the function limit and poll the database for changes.
+  SSE_MAX_DURATION_MS: z.coerce.number().int().min(0).max(3_600_000).default(0),
+  REALTIME_POLL_MS: z.coerce.number().int().min(0).max(60_000).default(0),
 });
 
 export type AppEnv = z.infer<typeof envSchema>;
@@ -42,7 +45,7 @@ let cachedEnv: AppEnv | undefined;
 export function getEnv(): AppEnv {
   if (cachedEnv) return cachedEnv;
 
-  const parsed = envSchema.safeParse(Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== '')));
+  const parsed = envSchema.safeParse(withVercelDefaults(Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== ''))));
   if (!parsed.success) {
     const details = parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ');
     throw new Error(`Configuración de entorno inválida: ${details}`);
@@ -71,6 +74,21 @@ export function getEnv(): AppEnv {
 
   cachedEnv = env;
   return env;
+}
+
+/** Vercel serves frontend and API from the same domain; trust its own HTTPS domains automatically. */
+function withVercelDefaults(source: Record<string, string | undefined>): Record<string, string | undefined> {
+  if (!source.VERCEL) return source;
+  const vercelOrigins = [source.VERCEL_PROJECT_PRODUCTION_URL, source.VERCEL_BRANCH_URL, source.VERCEL_URL]
+    .filter((host): host is string => Boolean(host))
+    .map((host) => `https://${host}`);
+  const origins = [...(source.ALLOWED_ORIGINS ?? '').split(','), ...vercelOrigins].map((value) => value.trim()).filter(Boolean);
+  return {
+    ...source,
+    ALLOWED_ORIGINS: [...new Set(origins)].join(','),
+    SSE_MAX_DURATION_MS: source.SSE_MAX_DURATION_MS ?? '270000',
+    REALTIME_POLL_MS: source.REALTIME_POLL_MS ?? '3000',
+  };
 }
 
 export function resetEnvForTests(): void {

@@ -133,21 +133,28 @@ Playwright ejecuta los builds compilados, usa un frontend aislado en `.rofe-e2e-
 
 ## Despliegue
 
-### Frontend — Vercel
+### Vercel (frontend + API en un solo proyecto)
 
-1. Importa el repositorio.
-2. Build command: `npm ci && npm run build`.
-3. Output: `dist`.
-4. Configura `VITE_API_URL=https://tu-backend.onrender.com`.
-5. Agrega la URL final del frontend a `ALLOWED_ORIGINS` en backend.
+La PWA y la API Express se publican juntas en Vercel; no hay servidor aparte. `vercel.json` define todo:
 
-### Backend — Render
+- Instalación: `npm ci && npm --prefix backend ci`.
+- Build: `npm --prefix backend run build && npm run build` → estáticos en `dist/`.
+- `api/index.js` exporta la app Express como Vercel Function (`maxDuration` 300 s). `/api/*`, `/health` y `/ready` se reescriben hacia ella, así que el frontend usa el mismo dominio.
 
-1. Usa `render.yaml` o crea un Web Service Node.
-2. Build: `cd backend && npm ci && npm run build`.
-3. Start: `cd backend && npm start`.
-4. Health check: `/ready`.
-5. Configura todas las variables de `backend/.env.example` como secretos.
+Pasos:
+
+1. Importa el repositorio en Vercel (Framework: Vite; la raíz del proyecto es la raíz del repo).
+2. **No** configures `VITE_API_URL` (o déjalo vacío): el frontend llama a `/api` en su propio dominio.
+3. Agrega como variables de entorno (Production) todas las de `backend/.env.example`: `NODE_ENV=production`, secretos JWT, Supabase, Mercado Pago, Stripe, `DEVICE_ENROLLMENT_SECRET` y `AUTH_BOOTSTRAP_ADMIN_HASH`. Los dominios `*.vercel.app` del proyecto se agregan solos a `ALLOWED_ORIGINS`; incluye ahí sólo dominios propios. `PUBLIC_ORDERING_URL` debe ser el dominio final.
+4. Actualiza las URLs de webhooks: `https://<tu-dominio>/api/webhooks/mercadopago` y `https://<tu-dominio>/api/webhooks/stripe`.
+5. Aplica las migraciones de Supabase (incluida `006_orders_updated_at_trigger.sql`) antes del primer despliegue.
+
+Diferencias por ser serverless:
+
+- **Tiempo real**: cada instancia tiene su propia memoria, así que el stream SSE (`/api/events`) consulta `orders.updated_at` cada `REALTIME_POLL_MS` (3 s) y reenvía cambios; se cierra a los `SSE_MAX_DURATION_MS` (270 s) y el cliente reconecta solo.
+- **Conciliación de pedidos QR**: el webhook de Stripe es la vía principal; además se consulta Stripe cuando el cliente revisa su pedido y, mientras haya un POS/KDS conectado, se barren los pendientes cada minuto. No se usan tareas programadas.
+- **Rate limiting** es por instancia (en memoria); es una defensa básica, no global.
+- La base JSON local no funciona en Vercel (sistema de archivos efímero); producción exige Supabase.
 
 ### Supabase
 
@@ -170,4 +177,4 @@ La secuencia de apertura, caída de red, compra, merma, devolución y cierre est
 
 Consulta [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md) para los cambios verificados y los requisitos de la validación real. El repositorio incluye CI con build, lint, tipos, pruebas, auditoría de dependencias, navegador y PostgreSQL.
 
-También puedes construir el contenedor del backend con `docker build -t rofe-api ./backend`. Sus secretos se proporcionan al ejecutar el contenedor; no se incluyen en la imagen.
+Para desarrollo o autohospedaje sigue disponible el contenedor: `docker build -t rofe-api ./backend`. Producción se despliega en Vercel.

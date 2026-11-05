@@ -1,5 +1,28 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "installCommand": "npm ci && npm --prefix backend ci",
+  "buildCommand": "npm --prefix backend run build && npm run build",
+  "outputDirectory": "dist",
+  "functions": {
+    "api/index.js": {
+      "maxDuration": 300,
+      "includeFiles": "backend/dist/**"
+    }
+  },
   "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "/api"
+    },
+    {
+      "source": "/health",
+      "destination": "/api"
+    },
+    {
+      "source": "/ready",
+      "destination": "/api"
+    },
     {
       "source": "/((?!api/|sw.js|manifest.webmanifest|favicon.svg|icon-|assets/|fonts/|.*\\.(?:webp|png|jpg|jpeg)$).*)",
       "destination": "/index.html"
@@ -9,15 +32,27 @@
     {
       "source": "/manifest.webmanifest",
       "headers": [
-        { "key": "Content-Type", "value": "application/manifest+json; charset=utf-8" },
-        { "key": "Cache-Control", "value": "no-cache, must-revalidate" }
+        {
+          "key": "Content-Type",
+          "value": "application/manifest+json; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, must-revalidate"
+        }
       ]
     },
     {
       "source": "/sw.js",
       "headers": [
-        { "key": "Content-Type", "value": "text/javascript; charset=utf-8" },
-        { "key": "Service-Worker-Allowed", "value": "/" },
+        {
+          "key": "Content-Type",
+          "value": "text/javascript; charset=utf-8"
+        },
+        {
+          "key": "Service-Worker-Allowed",
+          "value": "/"
+        },
         {
           "key": "Cache-Control",
           "value": "no-cache, no-store, must-revalidate"

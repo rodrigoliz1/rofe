@@ -258,6 +258,7 @@ export interface DbOrder {
 export interface DbAdapter {
   initialize(): Promise<void>;
   getOrders(): Promise<DbOrder[]>;
+  getOrdersUpdatedSince(sinceIso: string): Promise<DbOrder[]>;
   getOrderById(id: string): Promise<DbOrder | undefined>;
   getOrderByOperationId(operationId: string): Promise<DbOrder | undefined>;
   getPendingPickupOrders(): Promise<DbOrder[]>;
@@ -462,6 +463,11 @@ export class JsonDbAdapter implements DbAdapter {
   async getOrderById(id: string): Promise<DbOrder | undefined> {
     return (await this.getOrders()).find((order) => order.id === id);
   }
+  async getOrdersUpdatedSince(sinceIso: string): Promise<DbOrder[]> {
+    const since = Date.parse(sinceIso);
+    return (await this.getOrders()).filter((order) => Date.parse(order.updatedAt ?? order.createdAt ?? '') >= since);
+  }
+
   async getPendingPickupOrders(): Promise<DbOrder[]> {
     await this.read();
     return this.data.orders.filter((order) => order.channel === 'QR_PICKUP' && order.status === 'PENDING_PAYMENT' && order.paymentStatus === 'PENDING').slice(0, 100);
