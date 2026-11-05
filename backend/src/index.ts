@@ -7,6 +7,7 @@ import rateLimit from 'express-rate-limit';
 import type { AuthPrincipal } from './auth/types';
 import { randomUUID } from 'crypto';
 import { db } from './db';
+import type { DbOrder } from './db';
 import { registerCatalogRoutes } from './routes/catalog';
 import { registerPickupRoutes, refreshPickupOrder, cancelPickupOrder } from './routes/pickup';
 import { StripePickupService } from './payments/stripePickup';
@@ -53,6 +54,20 @@ const auditSensitive = (req: express.Request, input: { action: string; entity: s
 
 app.set('trust proxy', env.TRUST_PROXY);
 app.disable('x-powered-by');
+
+// Serverless (Vercel) has no start() step: initialize once per instance before the first request.
+let readyPromise: Promise<void> | undefined;
+export function ensureReady(): Promise<void> {
+  readyPromise ??= (async () => {
+    await db.initialize();
+    await authService.initialize();
+  })().catch((error: unknown) => {
+    readyPromise = undefined;
+    throw error;
+  });
+  return readyPromise;
+}
+if (process.env.VERCEL) app.use((_req, _res, next) => { ensureReady().then(() => next(), next); });
 app.use(requestContext);
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 const allowedOrigins = new Set(env.ALLOWED_ORIGINS.split(',').map((origin) => origin.trim()).filter(Boolean));
@@ -213,7 +228,9 @@ app.get('/api/events', requireAuth, requireRole('ADMIN', 'MANAGER', 'BARISTA', '
   // Keep-alive heartbeat
   res.write('data: {"type":"connected"}\n\n');
 
-  clients.push({ response: res, principal: req.principal! });
+  const principal = req.principal!;
+  const client = { response: res, principal };
+  clients.push(client);
   const token = req.header('authorization')?.slice(7) ?? '';
   const sessionCheck = setInterval(() => {
     void authService.verifyActiveAccessToken(token).catch(() => res.end());
@@ -221,14 +238,84 @@ app.get('/api/events', requireAuth, requireRole('ADMIN', 'MANAGER', 'BARISTA', '
   const heartbeat = setInterval(() => {
     if (!res.writableEnded) res.write(': heartbeat\n\n');
   }, 20_000);
+
+  // Serverless instances do not share memory, so a broadcast from another instance never
+  // reaches this stream. Poll the database and forward order changes as regular events.
+  let poller: NodeJS.Timeout | undefined;
+  if (env.REALTIME_POLL_MS > 0) {
+    let fingerprints: Map<string, string> | undefined;
+    let polling = false;
+    poller = setInterval(() => {
+      if (polling || res.writableEnded) return;
+      polling = true;
+      void (async () => {
+        const orders = await db.getOrdersUpdatedSince(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+        const next = new Map(orders.map((order) => [order.id, orderFingerprint(order)]));
+        if (fingerprints) {
+          let changed = false;
+          for (const order of orders) {
+            if (fingerprints.get(order.id) === next.get(order.id)) continue;
+            changed = true;
+            if (principal.role === 'POS_DEVICE' && order.deviceId !== principal.deviceId) continue;
+            res.write(`data: ${JSON.stringify({ type: 'order_updated', orderId: order.id, order })}\n\n`);
+          }
+          if (changed) res.write('data: {"type":"inventory_updated"}\n\n');
+        }
+        fingerprints = next;
+        await reconcilePendingPickupThrottled();
+      })().catch(() => console.error(JSON.stringify({ level: 'error', event: 'realtime_poll_failed' }))).finally(() => { polling = false; });
+    }, env.REALTIME_POLL_MS);
+  }
+  // Close before the platform kills the function; the client reconnects immediately.
+  const lifetime = env.SSE_MAX_DURATION_MS > 0 ? setTimeout(() => res.end(), env.SSE_MAX_DURATION_MS) : undefined;
   console.log(`Cliente SSE conectado. Total conectados: ${clients.length}`);
 
   req.on('close', () => {
     clearInterval(heartbeat);
     clearInterval(sessionCheck);
-    clients = clients.filter((client) => client.response !== res);
+    if (poller) clearInterval(poller);
+    if (lifetime) clearTimeout(lifetime);
+    clients = clients.filter((candidate) => candidate !== client);
     console.log(`Cliente SSE desconectado. Total conectados: ${clients.length}`);
   });
+});
+
+function orderFingerprint(order: DbOrder): string {
+  return JSON.stringify([order.status, order.paymentStatus, order.paymentId, order.updatedAt, order.cancellationReason]);
+}
+
+// --- QR pickup reconciliation (Stripe webhook is primary; this sweeps missed events) ---
+let sweeping = false;
+let lastSweepAt = 0;
+async function reconcilePendingPickup(): Promise<void> {
+  if (sweeping || !stripePickup.configured()) return;
+  sweeping = true;
+  lastSweepAt = Date.now();
+  try {
+    for (const order of await db.getPendingPickupOrders()) {
+      try {
+        const result = await refreshPickupOrder(stripePickup, order);
+        if (result.changed) {
+          broadcast({ type: 'order_updated', orderId: result.order.id, order: result.order });
+          broadcast({ type: 'inventory_updated' });
+        } else if (!result.order.paymentIntentId && Date.now() > Date.parse(order.pickup!.expiresAt) + 60_000) {
+          await cancelPickupOrder(stripePickup, result.order);
+          broadcast({ type: 'inventory_updated' });
+        }
+      } catch { console.error(JSON.stringify({ level: 'error', event: 'pickup_reconciliation_failed', orderId: order.id })); }
+    }
+  } catch { console.error(JSON.stringify({ level: 'error', event: 'pickup_sweep_failed' })); }
+  finally { sweeping = false; }
+}
+const reconcilePendingPickupThrottled = () => Date.now() - lastSweepAt >= 60_000 ? reconcilePendingPickup() : Promise.resolve();
+
+// Vercel Cron entry point. Vercel sends `Authorization: Bearer <CRON_SECRET>`.
+app.get('/api/cron/pickup-reconcile', async (req, res, next) => {
+  try {
+    if (!env.CRON_SECRET || req.header('authorization') !== `Bearer ${env.CRON_SECRET}`) throw new AppError(401, 'UNAUTHORIZED', 'No autorizado.');
+    await reconcilePendingPickup();
+    res.json({ ok: true });
+  } catch (error) { next(error); }
 });
 
 // --- API Routes ---
@@ -1248,32 +1335,11 @@ app.use(errorHandler);
 export { app };
 
 async function start(): Promise<void> {
-  await db.initialize();
-  await authService.initialize();
+  await ensureReady();
   const server = app.listen(PORT, () => {
     console.log(JSON.stringify({ level: 'info', event: 'server_started', port: PORT, environment: env.NODE_ENV }));
   });
 
-  let sweeping = false;
-  const reconcilePendingPickup = async () => {
-    if (sweeping || !stripePickup.configured()) return;
-    sweeping = true;
-    try {
-      for (const order of await db.getPendingPickupOrders()) {
-        try {
-          const result = await refreshPickupOrder(stripePickup, order);
-          if (result.changed) {
-            broadcast({ type: 'order_updated', orderId: result.order.id, order: result.order });
-            broadcast({ type: 'inventory_updated' });
-          } else if (!result.order.paymentIntentId && Date.now() > Date.parse(order.pickup!.expiresAt) + 60_000) {
-            await cancelPickupOrder(stripePickup, result.order);
-            broadcast({ type: 'inventory_updated' });
-          }
-        } catch { console.error(JSON.stringify({ level: 'error', event: 'pickup_reconciliation_failed', orderId: order.id })); }
-      }
-    } catch { console.error(JSON.stringify({ level: 'error', event: 'pickup_sweep_failed' })); }
-    finally { sweeping = false; }
-  };
   const pickupTimer = setInterval(() => void reconcilePendingPickup(), 60_000);
   pickupTimer.unref();
   void reconcilePendingPickup();
@@ -1294,7 +1360,7 @@ async function start(): Promise<void> {
   process.once('SIGINT', () => shutdown('SIGINT'));
 }
 
-if (env.NODE_ENV !== 'test') {
+if (env.NODE_ENV !== 'test' && !process.env.VERCEL) {
   start().catch((error: unknown) => {
     console.error(JSON.stringify({ level: 'error', event: 'startup_failed', message: error instanceof Error ? error.message : String(error) }));
     process.exitCode = 1;

@@ -23,4 +23,12 @@ describe('production configuration', () => {
     configure(); vi.stubEnv('NODE_ENV', 'production'); vi.stubEnv('PUBLIC_ORDERING_URL', 'http://localhost:5173');
     expect(() => getEnv()).toThrow(/PUBLIC_ORDERING_URL/);
   });
+  it('trusts the Vercel domains and enables serverless realtime on Vercel', () => {
+    configure(); vi.stubEnv('NODE_ENV', 'development'); vi.stubEnv('VERCEL', '1'); vi.stubEnv('ALLOWED_ORIGINS', '');
+    vi.stubEnv('VERCEL_PROJECT_PRODUCTION_URL', 'rofe.vercel.app'); vi.stubEnv('VERCEL_URL', 'rofe-abc.vercel.app');
+    const env = getEnv();
+    expect(env.ALLOWED_ORIGINS.split(',')).toEqual(expect.arrayContaining(['https://rofe.vercel.app', 'https://rofe-abc.vercel.app']));
+    expect(env.REALTIME_POLL_MS).toBe(3000);
+    expect(env.SSE_MAX_DURATION_MS).toBe(270000);
+  });
 });
