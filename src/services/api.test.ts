@@ -30,3 +30,12 @@ it('retains the staff session when logout cannot reach the server, and clears it
   await logout();
   expect(getPrincipal()).toBeUndefined();
 });
+
+it('shows the actionable cash backend error together with its support code', async () => {
+  vi.stubGlobal('window', { location: { origin: 'https://rofe.test' } });
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    error: { code: 'CASH_DATABASE_UPDATE_REQUIRED', message: 'La caja necesita una actualización del sistema. Contacta a Administración.' },
+    requestId: 'cash-support-test',
+  }), { status: 503, headers: { 'Content-Type': 'application/json' } })));
+  await expect(apiJson('/api/admin/cash/session/open')).rejects.toThrow('La caja necesita una actualización del sistema. Contacta a Administración. Código de soporte: cash-support-test.');
+});

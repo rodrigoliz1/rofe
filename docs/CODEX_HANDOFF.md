@@ -171,3 +171,16 @@ Recetas y personalizaciones administrativas integradas a cotización, unidades, 
 La segunda app comparte código con Kiosco, entra por `/barista` con autenticación de personal y conserva permisos de cámara exclusivos para escaneo. Identidad, firma, icono y workflow separados; guía [Android Barista](../android-kiosk/BARISTA.md). No se debe confundir una APK compilada o una prueba de navegador con validación física en M10.
 
 Migración 008 sigue aplicada, sin ejecutarla de nuevo. Permanecen pruebas financieras reales autorizadas, firma release, comprobación física de las tablets, política fiscal de cupones y 10 alertas moderadas de tooling ESLint/minimatch (producción npm sin alertas). El dueño autorizó push/merge/despliegue condicionado a concluir correctamente; no presentar estos pendientes como «perfecto».
+
+## Incidente de caja de producción — 5-nov-2026, 14:55 (CDMX)
+
+Soporte `d25e4980-a770-4768-88cc-79465d24d8d9`: **apertura**, RPC
+`open_cash_session`, SQLSTATE 21000 por UPDATE sin WHERE rechazado por
+pg-safeupdate. El cierre tenía el mismo defecto. Ver diagnóstico y aplicación
+segura en [CASH_PRODUCTION_INCIDENT_2026-11-05.md](CASH_PRODUCTION_INCIDENT_2026-11-05.md).
+
+009 reemplaza ambas funciones sin tocar registros financieros; **aplicación remota
+pendiente de confirmación**. No volver a ejecutar 008 ni modificar saldos como
+solución. La regresión PostgreSQL ahora cubre el guard real, reversión ante fallo
+del informe y carreras de apertura/cierre. La base productiva seguía en 8 al
+comprobarla y no tenía sesiones ni movimientos de sesión; conserva registros legacy.

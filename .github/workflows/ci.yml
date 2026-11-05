@@ -39,7 +39,15 @@ jobs:
       - name: Browser critical flows
         run: npm run test:e2e
       - name: Install isolated PostgreSQL test tools
-        run: sudo apt-get update && sudo apt-get install -y postgresql
+        run: sudo apt-get update && sudo apt-get install -y postgresql postgresql-server-dev-all build-essential
+      - name: Build production query guard (pinned pg-safeupdate)
+        run: |
+          git init "$RUNNER_TEMP/pg-safeupdate"
+          git -C "$RUNNER_TEMP/pg-safeupdate" remote add origin https://github.com/eradman/pg-safeupdate.git
+          git -C "$RUNNER_TEMP/pg-safeupdate" fetch --depth 1 origin 37dbc9c4acf5e2504adf2b218e9c6b41751022f3
+          git -C "$RUNNER_TEMP/pg-safeupdate" checkout --detach FETCH_HEAD
+          make -C "$RUNNER_TEMP/pg-safeupdate" PG_CONFIG="$(command -v pg_config)"
+          echo "SAFEUPDATE_LIBRARY=$RUNNER_TEMP/pg-safeupdate/safeupdate.so" >> "$GITHUB_ENV"
       - name: PostgreSQL transactional checks
         run: PATH="$(pg_config --bindir):$PATH" npm --prefix backend run test:db
       - name: Upload browser evidence

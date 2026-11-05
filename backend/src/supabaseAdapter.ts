@@ -16,6 +16,7 @@ export class SupabaseDbAdapter implements DbAdapter {
     if (version.error || typeof version.data !== 'number' || version.data < 5) throw new Error('Aplica las migraciones de ROFÉ antes de iniciar el servidor (versión 5 o superior requerida).');
     this.schemaVersion = version.data;
     if (version.data < 7) console.warn(JSON.stringify({ level: 'warn', event: 'vouchers_unavailable', message: 'Aplica la migración 007_change_vouchers.sql para habilitar los cupones de cambio.' }));
+    if (version.data < 9) console.warn(JSON.stringify({ level: 'warn', event: 'cash_session_migration_pending', message: 'Aplica 009_cash_session_safe_updates.sql para compatibilidad de caja con pg-safeupdate.' }));
     const criticalTables = [
       'products', 'orders', 'inventory', 'raw_inventory', 'cash_register', 'cash_transactions', 'cash_sessions',
       'cash_movements', 'daily_closures', 'daily_closings', 'suppliers', 'purchases', 'purchase_items',
@@ -561,19 +562,19 @@ export class SupabaseDbAdapter implements DbAdapter {
 
   async openCashSession(session: DbCashSession): Promise<boolean> {
     const { data, error } = await this.supabase.rpc('open_cash_session', { p_session: session });
-    if (error) throw error;
+    if (error) throw Object.assign(error, { databaseFunction: 'open_cash_session' });
     return Boolean(data);
   }
 
   async closeCashSession(sessionId: string, close: Pick<DbCashSession, 'expectedCash' | 'countedCash' | 'difference' | 'closingDenominations' | 'closedBy' | 'closedAt'>): Promise<boolean> {
     const { data, error } = await this.supabase.rpc('close_cash_session', { p_session_id: sessionId, p_close: close });
-    if (error) throw error;
+    if (error) throw Object.assign(error, { databaseFunction: 'close_cash_session' });
     return Boolean(data);
   }
 
   async closeCashSessionWithClosing(sessionId: string, close: Pick<DbCashSession, 'expectedCash' | 'countedCash' | 'difference' | 'closingDenominations' | 'closedBy' | 'closedAt'>, closure: DbDailyClosure): Promise<boolean> {
     const { data, error } = await this.supabase.rpc('close_cash_session_with_closing', { p_session_id: sessionId, p_close: close, p_closure: closure });
-    if (error) throw error;
+    if (error) throw Object.assign(error, { databaseFunction: 'close_cash_session_with_closing' });
     return Boolean(data);
   }
 

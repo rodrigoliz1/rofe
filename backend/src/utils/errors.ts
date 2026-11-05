@@ -28,6 +28,8 @@ export function errorHandler(error: unknown, req: Request, res: Response, _next:
     return;
   }
 
+  const originalError = error;
+  const diagnostic = error && typeof error === 'object' ? error as { name?: unknown; code?: unknown; constraint?: unknown; message?: unknown; databaseFunction?: unknown } : undefined;
   const databaseMessage = error && typeof error === 'object' && 'message' in error ? String(error.message) : '';
   const providerType = error && typeof error === 'object' && 'type' in error ? String(error.type) : '';
   if (providerType.startsWith('Stripe')) error = new AppError(502, 'STRIPE_UNAVAILABLE', 'No pudimos confirmar la operación con el servicio de pago. Conserva tu pedido e intenta de nuevo en un momento.');
@@ -35,6 +37,7 @@ export function errorHandler(error: unknown, req: Request, res: Response, _next:
   if (/raw_inventory_reservations_check|El inventario está reservado/.test(databaseMessage)) error = new AppError(409, 'INVENTORY_RESERVED', 'Estos insumos están reservados para un cobro pendiente. Finaliza o cancela ese cobro primero.');
   if (/cash_session_required/.test(databaseMessage)) error = new AppError(409, 'CASH_SESSION_REQUIRED', 'Abre una sesión de caja antes de registrar este movimiento.');
   if (/insufficient_cash_denomination|Insufficient cash denomination/.test(databaseMessage)) error = new AppError(409, 'INSUFFICIENT_CASH', 'La caja no tiene esas denominaciones. Revisa el desglose del efectivo.');
+  if (diagnostic?.code === '21000' && /UPDATE requires a WHERE clause/.test(databaseMessage) && req.path.includes('/cash/session/')) error = new AppError(503, 'CASH_DATABASE_UPDATE_REQUIRED', 'La caja necesita una actualización del sistema. Contacta a Administración con el código de soporte; no es necesario repetir la operación.');
   const bodyError = error as { type?: string; status?: number };
   if (bodyError?.type === 'entity.too.large') { res.status(413).json({ error: { code: 'PAYLOAD_TOO_LARGE', message: 'El archivo o la solicitud es demasiado grande.' } }); return; }
   if (bodyError?.type === 'entity.parse.failed') { res.status(400).json({ error: { code: 'INVALID_JSON', message: 'La solicitud tiene un formato inválido.' } }); return; }
@@ -44,8 +47,7 @@ export function errorHandler(error: unknown, req: Request, res: Response, _next:
     : new AppError(500, 'INTERNAL_ERROR', 'No pudimos completar la operación.');
 
   const log = appError.status >= 500 ? console.error : console.warn;
-  const diagnostic = error && typeof error === 'object' ? error as { name?: unknown; code?: unknown; constraint?: unknown; message?: unknown; stack?: unknown } : undefined;
-  let diagnosticMessage = diagnostic?.message ? String(diagnostic.message) : String(error);
+  let diagnosticMessage = diagnostic?.message ? String(diagnostic.message) : String(originalError);
   // Database/provider errors may carry secrets: retain the cause without logging credentials.
   for (const [name, value] of Object.entries(process.env)) {
     if (/(SECRET|KEY|TOKEN|PASSWORD|HASH)/.test(name) && value && value.length >= 8) diagnosticMessage = diagnosticMessage.split(value).join('[REDACTED]');
@@ -59,8 +61,9 @@ export function errorHandler(error: unknown, req: Request, res: Response, _next:
     path: req.path,
     code: appError.code,
     message: diagnosticMessage,
-    errorType: diagnostic?.name ? String(diagnostic.name) : typeof error,
-    databaseCode: !(error instanceof AppError) && diagnostic?.code ? String(diagnostic.code) : undefined,
+    errorType: diagnostic?.name ? String(diagnostic.name) : typeof originalError,
+    databaseCode: !(originalError instanceof AppError) && diagnostic?.code ? String(diagnostic.code) : undefined,
+    databaseFunction: diagnostic?.databaseFunction ? String(diagnostic.databaseFunction) : undefined,
     constraint: diagnostic?.constraint ? String(diagnostic.constraint) : undefined,
     operation: req.path.includes('/cash/session/') ? 'cash_session' : undefined,
   }));
