@@ -163,6 +163,10 @@ Diferencias por ser serverless:
 - Activa Point-in-Time Recovery o backups diarios según el plan.
 - Consulta [docs/BACKUP_AND_RECOVERY.md](docs/BACKUP_AND_RECOVERY.md) antes de operar con dinero real.
 
+### Terminal de autoservicio (tablet Android)
+
+`/kiosk` es la terminal de autoservicio táctil (vertical y horizontal) y `android-kiosk/` la APK que la muestra a pantalla completa en modo kiosco. Arquitectura y decisiones: [docs/KIOSK.md](docs/KIOSK.md). Instalación en la Lenovo Tab M10, Device Owner, firma y ADB: [android-kiosk/README.md](android-kiosk/README.md).
+
 ## Operación y diagnóstico
 
 - `/health`: proceso Express vivo.

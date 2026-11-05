@@ -126,3 +126,17 @@ APK: ver la sección *Seguridad de la WebView* de `android-kiosk/README.md` (all
 - E2E Playwright, perfiles **M10 landscape** (1280×800) y **M10 portrait** (800×1280) con táctil (`e2e/kiosk-terminal.spec.ts`): zoom bloqueado y CTA visible, flujo completo con doble toque y reinicio automático, rotación sin perder pedido ni modal ni modificadores, teclado virtual simulado en vertical, inactividad con reloj simulado, sin conexión y recuperación, Atrás, cancelación, viewports pequeños, acceso de equipo por pulsación larga. Cada test corre en ambos perfiles (22 en total).
 - Suite existente (POS, KDS, admin, pagos, PWA): 52 tests en verde tras los cambios.
 - Android: ver `android-kiosk/README.md` → *Tests*.
+
+## 15. Resultados de build (rama `claude/android-kiosk-m10`)
+
+| Verificación | Resultado |
+| --- | --- |
+| Web: lint, typecheck, tests unitarios (17), build de producción, validación PWA | OK |
+| Web E2E: suite completa (POS, KDS, admin, pagos, PWA) + 22 del kiosco en perfiles M10 | OK |
+| CI web (`ci.yml`, incluye PostgreSQL) | OK |
+| Android: tests JVM + Robolectric (21) | OK |
+| Android lint (debug) y lint vital (staging/release) | OK |
+| APK debug, staging y release (R8 + reducción de recursos) | OK |
+| Tests instrumentados en emulador de tablet API 34 (5) | OK |
+
+**APK**: artefacto **`rofe-kiosk-apk`** del workflow *Android kiosk* en GitHub Actions (pestaña *Actions → Android kiosk →* última ejecución *→ Artifacts*). Contiene `rofe-kiosk-debug.apk` (instalable de inmediato, apunta a `https://rofe.vercel.app/kiosk`), `app-staging.apk` (firmado con la clave debug mientras no exista keystore release), `app-release-unsigned.apk` y `SHA256SUMS`. Los artefactos expiran a los 30 días; volver a ejecutar el workflow genera uno nuevo.
