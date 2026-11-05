@@ -87,7 +87,7 @@ export function resolveModifiers(product: DbProduct, selections: Record<string, 
       if (group.ingredientId && option.ingredientQuantity) recipe[group.ingredientId] = (recipe[group.ingredientId] ?? 0) + option.ingredientQuantity;
       for (const [id, amount] of Object.entries(option.recipeDeltas ?? {})) recipe[id] = (recipe[id] ?? 0) + amount;
       const unit = ingredients.get(group.ingredientId ?? '')?.unit ?? (group.purpose === 'sugar' ? 'g' : '');
-      const milkAmount = group.purpose === 'milk' && option.ingredientId ? ` (${recipe[option.ingredientId]} ${ingredients.get(option.ingredientId)?.unit ?? 'ml'})` : '';
+      const milkAmount = group.purpose === 'milk' && option.ingredientId ? ` (${Number(recipe[option.ingredientId].toFixed(3))} ${ingredients.get(option.ingredientId)?.unit ?? 'ml'})` : '';
       const label = `${group.title}: ${name}${milkAmount}${option.ingredientQuantity ? ` (${option.ingredientQuantity} ${unit})` : ''}`;
       modifiers.push({ name: label, amount: option.priceModifier }); preparation.push(option.instruction ? `${label} · ${option.instruction}` : label);
       quantity = 1;
@@ -102,7 +102,7 @@ export function resolveModifiers(product: DbProduct, selections: Record<string, 
     if (!amount) delete recipe[id];
     if (inventory && amount > 0 && !ingredients.has(id)) throw new AppError(409, 'INGREDIENT_UNAVAILABLE', 'Un ingrediente de esta receta no está disponible. Solicita ayuda al equipo.');
   }
-  const ingredientLabels = Object.entries(recipe).map(([id, amount]) => `${ingredients.get(id)?.name ?? id}: ${amount} ${ingredients.get(id)?.unit ?? ''}`.trim());
+  const ingredientLabels = Object.entries(recipe).map(([id, amount]) => `${ingredients.get(id)?.name ?? id}: ${Number(amount.toFixed(3))} ${ingredients.get(id)?.unit ?? ''}`.trim());
   const unitCost = Object.entries(recipe).reduce((sum, [id, amount]) => { const item = ingredients.get(id); return sum + (item && item.stock > 0 ? amount * item.cost / item.stock : 0); }, 0);
   return { recipe, modifiers, preparation, ingredientLabels, unitCost };
 }

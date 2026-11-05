@@ -1,5 +1,7 @@
 # ROFÉ Barista — segunda terminal
 
+Para las APK definitivas por Wi-Fi, certificados y actualización sin borrar datos, consulta [Producción](PRODUCTION.md). Los comandos de loopback siguientes son exclusivamente de desarrollo.
+
 El módulo `:barista` produce una aplicación independiente que comparte el código nativo de `:app`, la interfaz `BaristaView`, los servicios y el backend de ROFÉ. No contiene otra implementación de recetas, pagos ni inventario.
 
 | Aplicación | Debug | Release | Entrada |

@@ -36,6 +36,8 @@ jobs:
         run: ./gradlew --no-daemon :barista:testDebugUnitTest
       - name: Android lint
         run: ./gradlew --no-daemon :barista:lintDebug
+      - name: Increment independent Barista version
+        run: echo "ROFE_BARISTA_VERSION_CODE=$((GITHUB_RUN_NUMBER + 2))" >> "$GITHUB_ENV"
       - name: Restore release keystore (only when the secret exists)
         env:
           KEYSTORE_BASE64: ${{ secrets.ROFE_BARISTA_KEYSTORE_BASE64 }}
@@ -43,7 +45,6 @@ jobs:
         run: echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/rofe-barista-release.jks"
       - name: Build debug, staging and release APKs
         env:
-          ROFE_BARISTA_VERSION_CODE: ${{ github.run_number }}
           ROFE_BARISTA_KEYSTORE_FILE: ${{ secrets.ROFE_BARISTA_KEYSTORE_BASE64 != '' && format('{0}/rofe-barista-release.jks', runner.temp) || '' }}
           ROFE_BARISTA_KEYSTORE_PASSWORD: ${{ secrets.ROFE_BARISTA_KEYSTORE_PASSWORD }}
           ROFE_BARISTA_KEY_ALIAS: ${{ secrets.ROFE_BARISTA_KEY_ALIAS }}

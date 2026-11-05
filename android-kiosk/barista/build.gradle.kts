@@ -44,7 +44,7 @@ android {
         buildConfigField("boolean", "AUTO_START_DEFAULT", "false")
         minSdk = 26
         targetSdk = 35
-        versionCode = setting("barista.versionCode", "1").toInt()
+        versionCode = setting("barista.versionCode", "2").toInt()
         versionName = setting("barista.versionName", "1.0.0")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -87,7 +87,7 @@ android {
             resValue("string", "app_name", "ROFÉ Barista")
             buildConfigField("String", "KIOSK_URL", quoted(baristaUrl("barista.releaseUrl", requireHttps = true)))
             buildConfigField("boolean", "ALLOW_CLEARTEXT", "false")
-            buildConfigField("boolean", "LOCK_TASK_DEFAULT", "true")
+            buildConfigField("boolean", "LOCK_TASK_DEFAULT", "false")
             signingConfig = if (releaseSigningAvailable) signingConfigs.getByName("release") else null
         }
         create("staging") {
