@@ -1,9 +1,10 @@
-const { rmSync } = require('node:fs');
+const { mkdtempSync } = require('node:fs');
+const { tmpdir } = require('node:os');
 const { spawn } = require('node:child_process');
 const { join } = require('node:path');
 
-const databasePath = '/tmp/rofe-e2e-db.json';
-rmSync(databasePath, { force: true });
+const testDirectory = mkdtempSync(join(tmpdir(), 'rofe-e2e-'));
+const databasePath = join(testDirectory, 'db.json');
 
 const child = spawn(process.execPath, ['dist/index.js'], {
   cwd: join(process.cwd(), 'backend'),
@@ -11,6 +12,8 @@ const child = spawn(process.execPath, ['dist/index.js'], {
   env: {
     ...process.env,
     NODE_ENV: 'development',
+    VERCEL: '',
+    HOST: '127.0.0.1',
     SUPABASE_URL: '', SUPABASE_SERVICE_KEY: '', MERCADO_PAGO_ACCESS_TOKEN: '', MERCADO_PAGO_WEBHOOK_SECRET: '', POINT_DEVICE_ID: '',
     STRIPE_SECRET_KEY: '', STRIPE_WEBHOOK_SECRET: '', PUBLIC_ORDERING_URL: '',
     PORT: '3100',
@@ -25,6 +28,7 @@ const child = spawn(process.execPath, ['dist/index.js'], {
     DEVICE_ENROLLMENT_SECRET: 'e2e-device-enrollment-secret',
     ENABLE_PAYMENT_SIMULATION: 'true',
     DB_FILE_PATH: databasePath,
+    SECURITY_DEVICES_FILE_PATH: join(testDirectory, 'devices.json'),
   },
 });
 

@@ -39,9 +39,11 @@ Roles: `ADMIN`, `MANAGER`, `BARISTA` y `POS_DEVICE`.
 
 ## Desarrollo local
 
+Para continuar en esta Mac usa el perfil aislado de [docs/LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md). `npm run dev` deshabilita Supabase y proveedores reales, conserva `backend/.env` y guarda los datos de desarrollo en `.rofe-local/`. El diagnóstico actual está en [docs/LOCAL_AUDIT_2026-11-05.md](docs/LOCAL_AUDIT_2026-11-05.md).
+
 ```bash
 cp .env.example .env.local
-cp backend/.env.example backend/.env
+cp backend/.env.example backend/.env.development.local
 npm ci
 npm --prefix backend ci
 ```
@@ -53,7 +55,7 @@ openssl rand -base64 48
 node backend/scripts/hash-password.cjs "una-contraseña-segura"
 ```
 
-Completa `backend/.env` y arranca ambos procesos:
+Completa los secretos locales de `backend/.env.development.local` (sin credenciales de producción) y arranca ambos procesos:
 
 ```bash
 npm run dev
@@ -129,7 +131,7 @@ npm --prefix backend run build
 
 Las pruebas PostgreSQL requieren `initdb`, `pg_ctl`, `createdb` y `psql`; crean y eliminan un clúster temporal propio y nunca usan `DATABASE_URL`. `check:production` sólo hace lecturas: verifica configuración, esquema y terminal vinculada.
 
-Playwright ejecuta los builds compilados, usa un frontend aislado en `.rofe-e2e-dist` y una base temporal en `/tmp/rofe-e2e-db.json` y credenciales exclusivas de test. No toca `backend/db.json`.
+Playwright ejecuta los builds compilados, usa un frontend aislado en `.rofe-e2e-dist`, una carpeta temporal única para la base y dispositivos y credenciales exclusivas de test. No toca `backend/db.json` ni los dispositivos locales existentes.
 
 ## Despliegue
 

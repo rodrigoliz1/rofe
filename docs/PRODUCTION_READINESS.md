@@ -58,7 +58,7 @@ Desde la revisión anterior se agregaron la terminal `/kiosk` con su APK Android
 
 Pendiente antes de operar con dinero real en el local:
 
-1. Aplicar `backend/migrations/008_voucher_ledger.sql` en Supabase. La 007 ya está aplicada.
+1. **Completado (5-nov-2026):** migraciones 001–008 aplicadas por el dueño. Una consulta GET de solo lectura confirmó `rofe_schema_version() = 8`. No se ejecutó ninguna migración remota durante la auditoría local.
 2. Hacer una prueba controlada en el local: un cobro en efectivo con cupón, su uso en otro pedido, el pago del cupón en efectivo y el corte de caja, con diferencia 0.
 3. Que el contador defina el tratamiento fiscal y la vigencia de los cupones.
 4. Firmar la APK de release (secretos `ROFE_KEYSTORE_BASE64`, `ROFE_KEYSTORE_PASSWORD`, `ROFE_KEY_ALIAS` y `ROFE_KEY_PASSWORD` en GitHub) e instalarla en la Lenovo M10 física como Device Owner.

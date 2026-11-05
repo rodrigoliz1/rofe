@@ -35,5 +35,6 @@ coverage/
 .vite/
 
 .rofe-e2e-dist/
+.rofe-local/
 backend/rofe-product-images/
 .impeccable/review/

@@ -2,6 +2,8 @@
 
 Fecha: 5 de noviembre de 2026. Este documento basta para continuar sin el historial de la sesión anterior. Las respuestas al dueño van **en español**.
 
+Continuación en la Mac: el diagnóstico y la configuración aislada se conservan en la rama local **`codex/rofe-development`**, basada en el estado de la rama Claude descrito abajo. Consulta [LOCAL_DEVELOPMENT.md](LOCAL_DEVELOPMENT.md) para arrancar y [CATALOG_REPLACEMENT_PLAN.md](CATALOG_REPLACEMENT_PLAN.md) para el orden de correcciones y la sustitución fotográfica. Sin push ni cambios a producción.
+
 ## 1. Estado del repositorio
 
 | Elemento | Estado |
@@ -12,7 +14,7 @@ Fecha: 5 de noviembre de 2026. Este documento basta para continuar sin el histor
 | `main` | Lo despliega Vercel en producción (`rofe.vercel.app`) |
 | PR #1 (Render → Vercel) | Fusionado por squash (`9454620`). La rama `claude/practical-archimedes-3ibbur` contiene sus commits originales; no hay trabajo perdido |
 | `claude/android-kiosk-m10` | Sin commits fuera de `main` |
-| Migraciones aplicadas en Supabase (según el dueño) | 001–007. **Falta la 008** |
+| Migraciones aplicadas en Supabase | **001–008 aplicadas**. Confirmado por el dueño y por consulta GET de solo lectura a `rofe_schema_version()` (8) el 5-nov-2026 |
 
 Para continuar en la Mac:
 
@@ -21,12 +23,12 @@ git fetch origin
 git checkout claude/kiosk-production-hardening
 git pull origin claude/kiosk-production-hardening
 npm ci && npm --prefix backend ci
-cp .env.example .env.local      # VITE_API_URL=http://localhost:3000
-cp backend/.env.example backend/.env   # completar secretos locales; nunca reales en git
+# Sigue docs/LOCAL_DEVELOPMENT.md para crear el perfil aislado.
+# No sobrescribas backend/.env: puede contener credenciales reales.
 npm run dev
 ```
 
-Sin `SUPABASE_URL`, el backend usa la base JSON local (`backend/db.json`, ignorada por git).
+`npm run dev` fuerza el adaptador JSON aislado en `.rofe-local/db.json`, pagos simulados y servicios remotos deshabilitados. Conserva `backend/.env` y `backend/db.json` (este último está versionado como semilla). Consulta [LOCAL_DEVELOPMENT.md](LOCAL_DEVELOPMENT.md) y [LOCAL_AUDIT_2026-11-05.md](LOCAL_AUDIT_2026-11-05.md).
 
 ## 2. Arquitectura
 
@@ -135,9 +137,7 @@ Pruebas clave de cupones: `backend/tests/vouchers.test.ts`, `e2e/cash-vouchers.s
 
 ## 6. Riesgos conocidos
 
-1. **Migración 008 sin aplicar**:
-   - Usar un cupón en un pedido responde 503.
-   - El reembolso sigue registrando en caja el total del pedido (también con tarjeta), lo que descuadra `expectedCash`.
+1. **Migración 008 aplicada**: pendiente resuelto. La función remota de versión devuelve 8; aún falta validar los recorridos reales de cupones y reembolsos con autorización.
 2. Los cupones no caducan y su tratamiento fiscal no está definido; lo debe decidir el contador.
 3. Un pedido pendiente abandonado que reservó un cupón lo bloquea hasta que un gerente cancela el pedido.
 4. El cobro parcial con Point (total menos cupón) no se ha probado contra Mercado Pago real.
@@ -149,7 +149,7 @@ Pruebas clave de cupones: `backend/tests/vouchers.test.ts`, `e2e/cash-vouchers.s
 ## 7. Tareas pendientes, en orden sugerido
 
 1. Abrir un PR con los commits de documentación que siguen en esta rama, cuando el dueño lo pida.
-2. Que el dueño aplique `backend/migrations/008_voucher_ledger.sql` en Supabase, y luego verificar `/ready` y una consulta a `/api/admin/vouchers`.
+2. **Resuelto:** el dueño aplicó `backend/migrations/008_voucher_ledger.sql`; versión remota 8 comprobada por lectura. La validación operativa de producción (`/ready`, consulta autenticada e importes reales) sigue pendiente; no aplicar otra vez la migración.
 3. Prueba controlada en el local: cobro en efectivo con cupón, uso del cupón en otro pedido, pago en efectivo de un cupón y corte de caja con diferencia 0.
 4. Configurar los secretos `ROFE_KEYSTORE_BASE64`, `ROFE_KEYSTORE_PASSWORD`, `ROFE_KEY_ALIAS`, `ROFE_KEY_PASSWORD` y, opcionalmente, `ROFE_ADMIN_PIN_HASH`, e instalar la APK release en la M10 como Device Owner (`android-kiosk/README.md`).
 5. Producir la colección de fotos definitiva y llevarla a `approved` con `scripts/product-images/import.py`.
