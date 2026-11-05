@@ -1,0 +1,9 @@
+# Caja: evidencia local del 5 de noviembre de 2026
+
+Se conservó `.rofe-local/db.json` y se probó una copia exacta con el mismo historial, inventario, denominaciones y sesión existente. En los datos actuales ya hay una caja abierta: intentar abrir otra devuelve 409 `CASH_SESSION_ALREADY_OPEN`. El request ID histórico `de7eb27d-8b7a-4059-b7b8-92729f12f121` no está en los logs disponibles; no se puede atribuir con certeza su 500 a una causa histórica.
+
+Se corrigió una debilidad comprobable: la apertura no tenía clave idempotente. Una respuesta perdida después de guardar podía dejar al usuario con una operación aparentemente fallida y un conflicto en el siguiente intento. Administración conserva ahora el identificador del intento en sessionStorage. El backend devuelve la misma sesión en un reintento idéntico, rechaza cambios de conteo o reutilización de aperturas cerradas y el JSON impide duplicar IDs. El conflicto con otra sesión abierta actualiza la vista y explica que primero requiere un corte. Los logs conservan el request ID y añaden tipo de error, código de base, restricción y operación; se filtran secretos de sus mensajes.
+
+Prueba API sobre la copia real: cierre de la sesión existente 200; apertura nueva 201; repetición del mismo intento 200 con el mismo ID; movimiento en efectivo y repetición sin duplicar saldo; cierre 200, diferencia 0. El hash SHA-256 del archivo original permaneció intacto. No se cerró ni abrió artificialmente la caja del usuario. La evidencia detallada privada está en `.rofe-local/evidence/cash-after.json` y `cash-after.log`.
+
+`backend/tests/cash-session.test.ts` reproduce apertura concurrente/reintento, conflicto de conteo, movimiento idempotente, cierre, rechazo de reapertura de un ID cerrado, nueva apertura, denominaciones inválidas y acceso anónimo sin cambios de caja. Ambas pruebas pasan. Las migraciones de producción no se modificaron ni ejecutaron.

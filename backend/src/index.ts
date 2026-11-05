@@ -1120,11 +1120,23 @@ app.get('/api/admin/cash/session', async (_req, res, next) => {
 
 app.post('/api/admin/cash/session/open', async (req, res, next) => {
   try {
-    const { denominations } = z.object({ denominations: z.record(z.string(), z.number().int().min(0)) }).parse(req.body);
+    const { denominations, operationId } = z.object({ denominations: z.record(z.string(), z.number().int().min(0)), operationId: z.string().uuid().optional() }).parse(req.body);
     const openingAmount = totalDenominations(denominations);
-    const session = { id: randomUUID(), openingAmount, openingDenominations: denominations, openedBy: req.principal!.subjectId, openedAt: new Date().toISOString() };
+    const session = { id: operationId ?? randomUUID(), openingAmount, openingDenominations: denominations, openedBy: req.principal!.subjectId, openedAt: new Date().toISOString() };
     const opened = await db.openCashSession(session);
-    if (!opened) throw new AppError(409, 'CASH_SESSION_ALREADY_OPEN', 'Ya existe una sesión de caja abierta.');
+    if (!opened) {
+      const previous = (await db.getCashSessions()).find((entry) => entry.id === session.id);
+      if (previous) {
+        const keys = new Set([...Object.keys(previous.openingDenominations), ...Object.keys(denominations)]);
+        if (previous.openedBy !== session.openedBy || [...keys].some((key) => (previous.openingDenominations[key] ?? 0) !== (denominations[key] ?? 0))) {
+          throw new AppError(409, 'CASH_OPEN_OPERATION_CONFLICT', 'Este intento de apertura ya se registró con otro conteo. Actualiza la caja antes de continuar.');
+        }
+        if (previous.closedAt) throw new AppError(409, 'CASH_OPEN_OPERATION_COMPLETED', 'La caja de este intento ya fue cerrada. Actualiza la pantalla para iniciar una apertura nueva.');
+        res.status(200).json({ ...previous, idempotentReplay: true });
+        return;
+      }
+      throw new AppError(409, 'CASH_SESSION_ALREADY_OPEN', 'Ya hay una caja abierta. Actualiza su estado y realiza el corte antes de abrir otra sesión.');
+    }
     await auditSensitive(req, { action: 'CASH_OPEN', entity: 'CASH_SESSION', entityId: session.id, after: session });
     broadcast({ type: 'cash_updated' });
     res.status(201).json(session);

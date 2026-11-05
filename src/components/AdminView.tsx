@@ -135,6 +135,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ products, onClose, onInven
   const [closureHistory, setClosureHistory] = useState<DailyClosure[]>([]);
   const [closureDenominations, setClosureDenominations] = useState<Record<string, number>>({});
   const [cashSession, setCashSession] = useState<CashSession | null>(null);
+  const [cashOpenOperation, setCashOpenOperation] = useState(() => sessionStorage.getItem('rofe.cash.open.operation') || createOperationId());
 
   const handleSaveProduct = async (p: Product, imgFile?: File) => {
     let image = p.image;
@@ -282,11 +283,21 @@ export const AdminView: React.FC<AdminViewProps> = ({ products, onClose, onInven
   };
 
   const handleOpenSession = async () => {
+    sessionStorage.setItem('rofe.cash.open.operation', cashOpenOperation);
     const res = await apiFetch('/api/admin/cash/session/open', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ denominations: closureDenominations }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ denominations: closureDenominations, operationId: cashOpenOperation }),
     });
-    if (!res.ok) throw new Error(await publicError(res));
-    await loadClosureData(); await loadMetrics(); setClosureDenominations({});
+    if (!res.ok) {
+      const message = await publicError(res);
+      if (res.status === 409) {
+        await loadClosureData();
+        sessionStorage.removeItem('rofe.cash.open.operation'); setCashOpenOperation(createOperationId());
+      }
+      throw new Error(message);
+    }
+    sessionStorage.removeItem('rofe.cash.open.operation'); setCashOpenOperation(createOperationId());
+    setClosureDenominations({});
+    await loadClosureData(); await loadMetrics();
   };
 
   return (

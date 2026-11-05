@@ -1064,7 +1064,7 @@ export class JsonDbAdapter implements DbAdapter {
 
   private async openCashSessionUnsafe(session: DbCashSession): Promise<boolean> {
     await this.read();
-    if (this.data.cashSessions.some((entry) => !entry.closedAt)) return false;
+    if (this.data.cashSessions.some((entry) => !entry.closedAt || entry.id === session.id)) return false;
     this.data.cashSessions.push(session);
     this.data.cashRegister = { ...session.openingDenominations };
     await this.save();

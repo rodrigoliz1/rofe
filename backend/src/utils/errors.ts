@@ -44,6 +44,13 @@ export function errorHandler(error: unknown, req: Request, res: Response, _next:
     : new AppError(500, 'INTERNAL_ERROR', 'No pudimos completar la operación.');
 
   const log = appError.status >= 500 ? console.error : console.warn;
+  const diagnostic = error && typeof error === 'object' ? error as { name?: unknown; code?: unknown; constraint?: unknown; message?: unknown; stack?: unknown } : undefined;
+  let diagnosticMessage = diagnostic?.message ? String(diagnostic.message) : String(error);
+  // Database/provider errors may carry secrets: retain the cause without logging credentials.
+  for (const [name, value] of Object.entries(process.env)) {
+    if (/(SECRET|KEY|TOKEN|PASSWORD|HASH)/.test(name) && value && value.length >= 8) diagnosticMessage = diagnosticMessage.split(value).join('[REDACTED]');
+  }
+  diagnosticMessage = diagnosticMessage.replace(/Bearer\s+\S+/gi, 'Bearer [REDACTED]').slice(0, 1000);
   log(JSON.stringify({
     level: appError.status >= 500 ? 'error' : 'warn',
     event: 'request_failed',
@@ -51,7 +58,11 @@ export function errorHandler(error: unknown, req: Request, res: Response, _next:
     method: req.method,
     path: req.path,
     code: appError.code,
-    message: error instanceof Error ? error.message : String(error),
+    message: diagnosticMessage,
+    errorType: diagnostic?.name ? String(diagnostic.name) : typeof error,
+    databaseCode: diagnostic?.code ? String(diagnostic.code) : undefined,
+    constraint: diagnostic?.constraint ? String(diagnostic.constraint) : undefined,
+    operation: req.path.includes('/cash/session/') ? 'cash_session' : undefined,
   }));
 
   res.status(appError.status).json({
