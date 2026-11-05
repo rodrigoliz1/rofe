@@ -128,7 +128,7 @@ test('adding updates the counter without opening the order and keeps the catalog
   await expect(drawer(page)).toHaveCount(0);
   expect(await grid.evaluate((element) => element.scrollTop)).toBe(scrolled);
   await page.getByRole('button', { name: /^Espresso/ }).click();
-  await page.getByRole('button', { name: /^\+$/ }).last().click(); // quantity 2 in the sheet
+  await page.getByRole('button', { name: 'Añadir un producto', exact: true }).click(); // quantity 2 in the sheet
   await page.getByRole('button', { name: /Agregar a la Orden/ }).click();
   await expect(page.locator('.kiosk-order-count')).toHaveText('3');
   await expect(orderButton(page)).toHaveAccessibleName(/3 artículos/);

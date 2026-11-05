@@ -1,6 +1,7 @@
 import type { CustomizationOptions } from '../types';
 
-export function pickupSummary(customization: CustomizationOptions | undefined, selections: Record<string, string> = {}, customizable = true): string {
+export function pickupSummary(customization: CustomizationOptions | undefined, selections: Record<string, string> = {}, customizable = true, preparation?: string[]): string {
+  if (preparation) return preparation.join(" · ") || "Receta de la casa";
   const parts = Object.entries(selections).map(([group, option]) => `${group}: ${option}`);
   if (customizable && customization) {
     if (customization.size === 'grande') parts.push('Grande');

@@ -11,7 +11,7 @@ export interface IngredientConsumption {
 export function calculateRecipeConsumption(items: PricedOrderItem[]): IngredientConsumption[] {
   const totals = new Map<string, number>();
   for (const item of items) {
-    const recipe = applyCustomization(item.product, item);
+    const recipe = item.recipeSnapshot ?? applyCustomization(item.product, item);
     for (const [ingredientId, quantity] of Object.entries(recipe)) {
       totals.set(ingredientId, (totals.get(ingredientId) ?? 0) + quantity * item.quantity);
     }

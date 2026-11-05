@@ -18,11 +18,26 @@ export interface DbRawInventory {
 export interface CustomVariantOption {
   name: string;
   priceModifier: number;
+  ingredientId?: string;
+  ingredientQuantity?: number;
+  recipeDeltas?: Record<string, number>;
+  instruction?: string;
+  available?: boolean;
 }
 
 export interface CustomVariantGroup {
   title: string;
   options: CustomVariantOption[];
+  kind?: 'choice' | 'quantity';
+  purpose?: 'general' | 'size' | 'milk' | 'ice' | 'temperature' | 'coffee' | 'sugar' | 'splenda';
+  enabled?: boolean;
+  required?: boolean;
+  ingredientId?: string;
+  amountPerUnit?: number;
+  min?: number;
+  max?: number;
+  pricePerUnit?: number;
+  availableMax?: number;
 }
 
 export interface DbProduct {
@@ -205,6 +220,11 @@ export interface DbOrderItem {
   selectedCustomVariants?: Record<string, string>;
   modifiers?: Array<{ name: string; amount: number }>;
   notes?: string;
+  quantitySelections?: Record<string, number>;
+  preparation?: string[];
+  ingredientInstructions?: string[];
+  recipeSnapshot?: Record<string, number>;
+  recipeCostSnapshot?: number;
 }
 
 import { SupabaseDbAdapter } from './supabaseAdapter';

@@ -1,11 +1,26 @@
 export interface CustomVariantOption {
   name: string;
   priceModifier: number;
+  ingredientId?: string;
+  ingredientQuantity?: number;
+  recipeDeltas?: Record<string, number>;
+  instruction?: string;
+  available?: boolean;
 }
 
 export interface CustomVariantGroup {
   title: string;
   options: CustomVariantOption[];
+  kind?: 'choice' | 'quantity';
+  purpose?: 'general' | 'size' | 'milk' | 'ice' | 'temperature' | 'coffee' | 'sugar' | 'splenda';
+  enabled?: boolean;
+  required?: boolean;
+  ingredientId?: string;
+  amountPerUnit?: number;
+  min?: number;
+  max?: number;
+  pricePerUnit?: number;
+  availableMax?: number;
 }
 
 export interface Product {
@@ -37,6 +52,11 @@ export interface CartItem {
   quantity: number;
   customization: CustomizationOptions;
   selectedCustomVariants?: Record<string, string>; // title -> optionName
+  quantitySelections?: Record<string, number>;
+  preparation?: string[];
+  recipeSnapshot?: Record<string, number>;
+  recipeCostSnapshot?: number;
+  ingredientInstructions?: string[];
   totalPrice: number;
 }
 

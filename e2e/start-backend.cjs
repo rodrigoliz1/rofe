@@ -1,10 +1,18 @@
-const { mkdtempSync } = require('node:fs');
+const { mkdtempSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { spawn } = require('node:child_process');
 const { join } = require('node:path');
 
 const testDirectory = mkdtempSync(join(tmpdir(), 'rofe-e2e-'));
 const databasePath = join(testDirectory, 'db.json');
+// Explicit administrative TEST fixture for the existing size/rotation acceptance flows.
+// Business data is never seeded or changed by this test configuration.
+const { DEFAULT_PRODUCTS } = require('../backend/dist/domain/catalog.js');
+const products = DEFAULT_PRODUCTS.map(product => product.id === 'latte' ? { ...product, custom_variants: [{
+  title: 'Tamaño', purpose: 'size', enabled: true,
+  options: [{ name: 'Regular', priceModifier: 0 }, { name: 'Grande', priceModifier: 12, recipeDeltas: { coffee_beans: 9, milk_whole: 110 } }],
+}] } : product);
+writeFileSync(databasePath, JSON.stringify({ products, orders: [], inventory: [], rawInventory: [], cashRegister: {}, transactions: [], bakeryBatches: [], dailyClosures: [], inventoryMovements: [], suppliers: [], purchases: [], wasteRecords: [], cashSessions: [], productionBatches: [], inventoryReservations: [] }));
 
 const child = spawn(process.execPath, ['dist/index.js'], {
   cwd: join(process.cwd(), 'backend'),

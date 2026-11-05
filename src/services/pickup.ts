@@ -6,12 +6,12 @@ export interface PickupMenu {
 }
 export interface PickupOrder {
   id: string; folio: string; customerName: string; status: OrderStatus; paymentStatus: PaymentStatus; total: number; createdAt: string; notes?: string;
-  items: Array<{ productName: string; quantity: number; unitPrice: number; totalPrice: number; customizable?: boolean; customization?: CustomizationOptions; modifiers?: Array<{ name: string; amount: number }>; selectedCustomVariants?: Record<string, string> }>;
+  items: Array<{ productName: string; quantity: number; unitPrice: number; totalPrice: number; customizable?: boolean; customization?: CustomizationOptions; modifiers?: Array<{ name: string; amount: number }>; selectedCustomVariants?: Record<string, string>; quantitySelections?: Record<string, number>; preparation?: string[] }>;
   pickup: { locationName: string; locationAddress: string; expiresAt: string };
 }
 export interface PickupAttempt {
   operationId: string; accessToken: string; customerName: string; standId: string; notes: string;
-  items: Array<{ productId: string; quantity: number; customization: CartItem['customization']; selectedCustomVariants?: Record<string, string> }>;
+  items: Array<{ productId: string; quantity: number; customization: CartItem['customization']; selectedCustomVariants?: Record<string, string>; quantitySelections?: Record<string, number>; preparation?: string[] }>;
 }
 export interface PickupReceipt { id: string; accessToken: string; folio?: string }
 export interface PickupDraft { cart: CartItem[]; customerName: string; notes: string; standId: string; attempt?: PickupAttempt; receipts: PickupReceipt[]; activeReceipt?: PickupReceipt }

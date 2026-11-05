@@ -1,316 +1,64 @@
-import React, { useMemo, useState } from 'react';
-import type { Product, CustomizationOptions, CartItem } from '../types';
+import { useEffect, useMemo, useState } from 'react';
+import type { Product, CustomizationOptions, CartItem, CustomVariantGroup } from '../types';
 import { configuredItemId } from '../utils/cart';
 import { useDialogFocus } from '../hooks/useDialogFocus';
 import { useBackHandler } from '../kiosk/backStack';
-import { ProductIcon } from './Icons';
 import { productPhoto } from '../services/productImages';
-
-interface ProductModalProps {
-  product: Product;
-  onClose: () => void;
-  onAddToCart: (item: CartItem) => void;
-  /** Use the same catalog photo in every product surface. */
-  showPhoto?: boolean;
-}
-
-const DEFAULT_CUSTOMIZATION: CustomizationOptions = {
-  size: 'regular',
-  milk: 'none',
-  sweetness: 'none',
-  temp: 'hot',
-  extraShot: false,
-};
-
-export const ProductModal: React.FC<ProductModalProps> = ({
-  product,
-  onClose,
-  onAddToCart,
-  showPhoto = true,
-}) => {
-  const photo = showPhoto ? productPhoto(product).detail : null;
+import { apiFetch, publicError } from '../services/api';
+interface Props { product: Product; onClose: () => void; onAddToCart: (item: CartItem) => void; showPhoto?: boolean }
+interface Quote { total: number; items: Array<{ unitPrice: number; preparation: string[] }> }
+export function ProductModal({ product, onClose, onAddToCart, showPhoto = true }: Props) {
   const dialogRef = useDialogFocus(onClose);
   useBackHandler(true, () => { onClose(); return true; });
-  const [customization, setCustomization] = useState<CustomizationOptions>({
-    ...DEFAULT_CUSTOMIZATION,
-    // Set default milk for milk-based coffees automatically
-    milk: product.name.toLowerCase().includes('latte') || product.name.toLowerCase().includes('white') ? 'whole' : 'none',
-    // Set default temp based on category
-    temp: product.category === 'cold' ? 'iced' : 'hot',
-  });
-
+  const photo = showPhoto ? productPhoto(product).detail : null;
+  const groups = (product.custom_variants ?? []).filter(group => group.enabled !== false);
   const [quantity, setQuantity] = useState(1);
-  const [selectedCustomVariants, setSelectedCustomVariants] = useState<Record<string, string>>({});
-
-  const totalPrice = useMemo(() => {
-    let base = product.price;
-
-    // Custom Variants
-    if (product.custom_variants) {
-      product.custom_variants.forEach(group => {
-        const selectedOptName = selectedCustomVariants[group.title];
-        if (selectedOptName) {
-          const opt = group.options.find(o => o.name === selectedOptName);
-          if (opt && opt.priceModifier) {
-            base += opt.priceModifier;
-          }
-        }
-      });
-    }
-
-    // Upgrades
-    if (customization.size === 'grande') {
-      base += 12; // +$12 MXN for grande
-    }
-    if (customization.milk === 'avena' || customization.milk === 'almendra') {
-      base += 15; // +$15 MXN for vegan milk
-    }
-    if (customization.extraShot) {
-      base += 15; // +$15 MXN for extra espresso shot
-    }
-
-    return base * quantity;
-  }, [customization, product.custom_variants, product.price, quantity, selectedCustomVariants]);
-
-  const handleOptionChange = <K extends keyof CustomizationOptions>(
-    key: K,
-    value: CustomizationOptions[K]
-  ) => {
-    setCustomization((prev) => ({
-      ...prev,
-      [key]: value,
-    }));
+  const [selections, setSelections] = useState<Record<string, string>>({});
+  const [counts, setCounts] = useState<Record<string, number>>(() => Object.fromEntries(groups.filter(g => g.kind === 'quantity').map(g => [g.title, g.min ?? 0])));
+  const [quote, setQuote] = useState<Quote | null>(null);
+  const [quoting, setQuoting] = useState(true);
+  const [error, setError] = useState('');
+  const [offline, setOffline] = useState(false);
+  const customization = useMemo<CustomizationOptions>(() => ({ size: 'regular', milk: 'none', sweetness: 'none', temp: product.category === 'cold' ? 'iced' : 'hot', extraShot: false }), [product.category]);
+  const payload = useMemo(() => ({ productId: product.id, quantity, customization, selectedCustomVariants: selections, quantitySelections: counts }), [product.id, quantity, customization, selections, counts]);
+  const preview = (product.price + groups.reduce((sum, g) => sum + (g.kind === 'quantity' ? (counts[g.title] ?? 0) * (g.pricePerUnit ?? 0) : g.options.find(o => o.name === selections[g.title])?.priceModifier ?? 0), 0)) * quantity;
+  useEffect(() => {
+    const controller = new AbortController();
+    setQuoting(true); setQuote(null); setError(''); setOffline(false);
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const response = await apiFetch(window.location.pathname.startsWith('/pedir') ? '/api/pickup/quote' : '/api/orders/quote', { method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: [payload] }) });
+          if (!response.ok) { const message = await publicError(response); if (!controller.signal.aborted) setError(message); return; }
+          const result = await response.json() as Quote;
+          if (!controller.signal.aborted) setQuote(result);
+        } catch { if (!controller.signal.aborted) { setOffline(true); setError('Sin conexión. El precio y los ingredientes se verificarán al sincronizar.'); } }
+        finally { if (!controller.signal.aborted) setQuoting(false); }
+      })();
+    }, 150);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [payload]);
+  const choose = (group: CustomVariantGroup, name: string) => {
+    setSelections(current => { const next = { ...current }; if (next[group.title] === name && !group.required) delete next[group.title]; else next[group.title] = name; return next; });
+    if (group.purpose === 'sugar') setCounts(current => Object.fromEntries(Object.entries(current).map(([title, value]) => [title, groups.find(g => g.title === title)?.purpose === 'splenda' ? 0 : value])));
   };
-
-  const handleIncrement = () => setQuantity((prev) => Math.min(50, prev + 1));
-  const handleDecrement = () => setQuantity((prev) => (prev > 1 ? prev - 1 : 1));
-
-  const handleAdd = () => {
-    // Generate a unique ID based on product ID and customization options
-    const uniqueId = configuredItemId(product.id, customization, selectedCustomVariants);
-
-    const cartItem: CartItem = {
-      id: uniqueId,
-      product,
-      quantity,
-      customization,
-      selectedCustomVariants,
-      totalPrice,
-    };
-
-    onAddToCart(cartItem);
-    onClose();
+  const count = (group: CustomVariantGroup, value: number) => {
+    setCounts(current => ({ ...current, [group.title]: value }));
+    if (value > 0 && group.purpose === 'splenda') setSelections(current => Object.fromEntries(Object.entries(current).filter(([title]) => groups.find(g => g.title === title)?.purpose !== 'sugar')));
   };
-
-  const handleCustomVariantChange = (groupTitle: string, optionName: string) => {
-    setSelectedCustomVariants(prev => {
-      const next = { ...prev };
-      if (next[groupTitle] === optionName) {
-        delete next[groupTitle]; // toggle off
-      } else {
-        next[groupTitle] = optionName;
-      }
-      return next;
-    });
+  const add = () => {
+    if (quoting || (!quote && !offline)) return;
+    const preparation = quote?.items[0].preparation ?? groups.flatMap(g => g.kind === 'quantity' ? counts[g.title] ? [`${g.title}: ${counts[g.title]} unidades`] : [] : selections[g.title] ? [`${g.title}: ${selections[g.title]}`] : []);
+    onAddToCart({ id: configuredItemId(product.id, customization, selections, counts), product, quantity, customization, selectedCustomVariants: selections, quantitySelections: counts, preparation, totalPrice: quote?.total ?? preview }); onClose();
   };
-
-  const isCoffeeOrCold = (product.category === 'coffee' || product.category === 'cold') && product.customizable !== false;
-
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={`Personalizar ${product.name}`} className="modal-sheet" onClick={(e) => e.stopPropagation()}>
-        <button className="modal-close-btn" onClick={onClose} aria-label="Cerrar personalización">
-          &times;
-        </button>
-
-        <div className="modal-header">
-          <div className="modal-icon-wrapper">
-            <ProductIcon name={product.icon} size={48} />
-          </div>
-          <div>
-            <h2 className="modal-title">{product.name}</h2>
-            <p className="modal-desc">{product.description}</p>
-          </div>
-        </div>
-
-        <div className="modal-body">
-          {photo && <div className="modal-photo"><img src={photo} alt="" width={960} height={960} decoding="async" draggable={false} /></div>}
-          {isCoffeeOrCold ? (
-            <>
-              {/* SIZE OPTION */}
-              <div className="customization-section">
-                <h4 className="section-label">TAMAÑO</h4>
-                <div className="options-selector">
-                  <button
-                    className={`option-btn ${customization.size === 'regular' ? 'active' : ''}`}
-                    onClick={() => handleOptionChange('size', 'regular')}
-                  >
-                    Regular <span className="option-sub">8 oz</span>
-                  </button>
-                  <button
-                    className={`option-btn ${customization.size === 'grande' ? 'active' : ''}`}
-                    onClick={() => handleOptionChange('size', 'grande')}
-                  >
-                    Grande <span className="option-sub">12 oz (+$12)</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* TEMPERATURE (only for coffee that can be iced/hot) */}
-              {product.category !== 'cold' && (
-                <div className="customization-section">
-                  <h4 className="section-label">TEMPERATURA</h4>
-                  <div className="options-selector">
-                    <button
-                      className={`option-btn ${customization.temp === 'hot' ? 'active' : ''}`}
-                      onClick={() => handleOptionChange('temp', 'hot')}
-                    >
-                      Caliente
-                    </button>
-                    <button
-                      className={`option-btn ${customization.temp === 'iced' ? 'active' : ''}`}
-                      onClick={() => handleOptionChange('temp', 'iced')}
-                    >
-                      Con Hielo
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* MILK OPTION */}
-              {(product.name.toLowerCase().includes('latte') ||
-                product.name.toLowerCase().includes('white') ||
-                product.name.toLowerCase().includes('capuccino')) && (
-                  <div className="customization-section">
-                    <h4 className="section-label">TIPO DE LECHE</h4>
-                    <div className="options-selector grid-3">
-                      <button
-                        className={`option-btn ${customization.milk === 'whole' ? 'active' : ''}`}
-                        onClick={() => handleOptionChange('milk', 'whole')}
-                      >
-                        Entera
-                      </button>
-                      <button
-                        className={`option-btn ${customization.milk === 'light' ? 'active' : ''}`}
-                        onClick={() => handleOptionChange('milk', 'light')}
-                      >
-                        Deslactosada
-                      </button>
-                      <button
-                        className={`option-btn ${customization.milk === 'avena' ? 'active' : ''}`}
-                        onClick={() => handleOptionChange('milk', 'avena')}
-                      >
-                        Avena <span className="option-sub">+$15</span>
-                      </button>
-                      <button
-                        className={`option-btn ${customization.milk === 'almendra' ? 'active' : ''}`}
-                        onClick={() => handleOptionChange('milk', 'almendra')}
-                      >
-                        Almendra <span className="option-sub">+$15</span>
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-              {/* SWEETENER */}
-              <div className="customization-section">
-                <h4 className="section-label">ENDULZANTE</h4>
-                <div className="options-selector grid-3">
-                  <button
-                    className={`option-btn ${customization.sweetness === 'none' ? 'active' : ''}`}
-                    onClick={() => handleOptionChange('sweetness', 'none')}
-                  >
-                    Sin azúcar
-                  </button>
-                  <button
-                    className={`option-btn ${customization.sweetness === 'standard' ? 'active' : ''}`}
-                    onClick={() => handleOptionChange('sweetness', 'standard')}
-                  >
-                    Estándar
-                  </button>
-                  <button
-                    className={`option-btn ${customization.sweetness === 'extra' ? 'active' : ''}`}
-                    onClick={() => handleOptionChange('sweetness', 'extra')}
-                  >
-                    Extra
-                  </button>
-                </div>
-              </div>
-
-              {/* EXTRA SHOT TOGGLE */}
-              <div className="customization-section toggle-row">
-                <div>
-                  <h4 className="section-label margin-0">ESPRESSO SHOT EXTRA</h4>
-                  <p className="option-sub">Añade una carga extra de café espresso (+ $15 MXN)</p>
-                </div>
-                <button
-                  className={`toggle-btn ${customization.extraShot ? 'active' : ''}`}
-                  onClick={() => handleOptionChange('extraShot', !customization.extraShot)}
-                >
-                  {customization.extraShot ? 'Añadido' : 'Agregar'}
-                </button>
-              </div>
-            </>
-          ) : (
-            // Bakery Customization (e.g. heated croissant)
-            <div className="customization-section">
-              <h4 className="section-label">PREPARACIÓN</h4>
-              <div className="options-selector">
-                <button
-                  className={`option-btn ${customization.temp === 'hot' ? 'active' : ''}`}
-                  onClick={() => handleOptionChange('temp', 'hot')}
-                >
-                  Calentar
-                </button>
-                <button
-                  className={`option-btn ${customization.temp === 'iced' ? 'active' : ''}`}
-                  onClick={() => handleOptionChange('temp', 'iced')} // we use 'iced' as "no calentar" just to fit model or whatever, let's keep it simple: hot = warmed, iced = room temp
-                >
-                  Servir al tiempo
-                </button>
-              </div>
-            </div>
-          )}
-          {/* CUSTOM VARIANTS RENDERING */}
-          {product.custom_variants && product.custom_variants.length > 0 && (
-            <div className="customization-section" style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 15, marginTop: 15 }}>
-              {product.custom_variants.map(group => (
-                <div key={group.title} style={{ marginBottom: 15 }}>
-                  <h4 className="section-label">{group.title}</h4>
-                  <div className="options-selector">
-                    {group.options.map(opt => (
-                      <button
-                        key={opt.name}
-                        className={`option-btn ${selectedCustomVariants[group.title] === opt.name ? 'active' : ''}`}
-                        onClick={() => handleCustomVariantChange(group.title, opt.name)}
-                      >
-                        {opt.name} {opt.priceModifier ? `(+${opt.priceModifier})` : ''}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="modal-footer">
-          <div className="quantity-selector">
-            <button className="qty-btn" onClick={handleDecrement}>
-              -
-            </button>
-            <span className="qty-value">{quantity}</span>
-            <button className="qty-btn" onClick={handleIncrement}>
-              +
-            </button>
-          </div>
-
-          <button className="add-to-cart-btn" onClick={handleAdd}>
-            <span>Agregar a la Orden</span>
-            <span className="price-tag">${totalPrice.toFixed(2)} MXN</span>
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
+  return <div className="modal-backdrop" onClick={onClose}><div ref={dialogRef} role="dialog" aria-modal="true" aria-label={`Personalizar ${product.name}`} className="modal-sheet" onClick={e => e.stopPropagation()}>
+    <button className="modal-close-btn" onClick={onClose} aria-label="Cerrar personalización">×</button><header className="modal-header"><div><h2 className="modal-title">{product.name}</h2><p className="modal-desc">{product.description}</p></div></header>
+    <div className="modal-body">{photo && <div className="modal-photo"><img src={photo} alt={product.name} width={960} height={960} decoding="async" draggable={false} /></div>}
+      {!groups.length && <p className="customization-base-note">Preparado con la receta de la casa. Las opciones adicionales se habilitan desde Administración.</p>}
+      {groups.map(group => <section className="customization-section" key={group.title}><h3 className="section-label">{group.title}{group.required ? ' · elige una opción' : ''}</h3>
+        {group.kind === 'quantity' ? <div className="modifier-count"><span>{group.purpose === 'splenda' ? 'Sobres individuales' : 'Unidades'} · máximo {Math.min(group.max ?? 0, group.availableMax ?? group.max ?? 0)} disponibles{group.pricePerUnit ? ` · $${group.pricePerUnit.toFixed(2)} por unidad` : ''}</span><div className="quantity-selector"><button type="button" className="qty-btn" aria-label={`Quitar ${group.title}`} disabled={(counts[group.title] ?? 0) <= (group.min ?? 0)} onClick={() => count(group, (counts[group.title] ?? 0) - 1)}>−</button><output aria-label={`Cantidad de ${group.title}`}>{counts[group.title] ?? 0}</output><button type="button" className="qty-btn" aria-label={`Añadir ${group.title}`} disabled={(counts[group.title] ?? 0) >= Math.min(group.max ?? 0, group.availableMax ?? group.max ?? 0)} onClick={() => count(group, (counts[group.title] ?? 0) + 1)}>+</button></div></div> : <div className="options-selector">{group.options.map(option => <button type="button" key={option.name} disabled={option.available === false} aria-pressed={selections[group.title] === option.name} className={`option-btn ${selections[group.title] === option.name ? 'active' : ''}`} onClick={() => choose(group, option.name)}>{option.name}{option.ingredientQuantity && <span className="option-sub">{option.ingredientQuantity} {group.purpose === 'sugar' ? 'g' : 'unidades'}</span>}{option.priceModifier > 0 && <span className="option-sub">+${option.priceModifier.toFixed(2)}</span>}{option.available === false && <span className="option-sub">Agotado</span>}</button>)}</div>}
+      </section>)}
+      {error && <p className={`inline-feedback ${offline ? '' : 'error'}`} role="status">{error}</p>}
+    </div><footer className="modal-footer"><div className="quantity-selector"><button className="qty-btn" disabled={quantity <= 1} aria-label="Quitar un producto" onClick={() => setQuantity(q => q - 1)}>−</button><span className="qty-value">{quantity}</span><button className="qty-btn" disabled={quantity >= 50} aria-label="Añadir un producto" onClick={() => setQuantity(q => q + 1)}>+</button></div><button className="add-to-cart-btn" disabled={quoting || (!quote && !offline)} onClick={add}><span>{quoting ? 'Verificando…' : 'Agregar a la Orden'}</span><span className="price-tag">${(quote?.total ?? preview).toFixed(2)} MXN</span></button></footer>
+  </div></div>;
+}

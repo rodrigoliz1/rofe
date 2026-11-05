@@ -338,7 +338,8 @@ app.post('/api/orders', requireAuth, requireRole('POS_DEVICE'), async (req, res,
     if (input.paymentMethod === 'card' && !mercadoPago.isConfigured() && !simulation) {
       throw new AppError(503, 'PAYMENT_PROVIDER_NOT_CONFIGURED', 'La terminal no está disponible. Selecciona efectivo o solicita ayuda.');
     }
-    const basePricing = priceOrder(await db.getProducts(), input.items);
+    const basePricing = priceOrder(await db.getProducts(), input.items, await db.getRawInventory());
+    if (input.expectedSubtotal !== undefined && Math.abs(basePricing.subtotal - input.expectedSubtotal) > 0.001) throw new AppError(409, 'PRICE_CHANGED', 'Los precios cambiaron. Actualiza el menú y revisa el pedido antes de confirmar.');
     const authorizedDiscount = input.discountAuthorizationToken
       ? discountAuthorization.verify(input.discountAuthorizationToken, input.operationId)
       : undefined;
@@ -522,7 +523,7 @@ app.post('/api/orders/sync', requireAuth, requireRole('POS_DEVICE'), async (req,
       if (operation.payload.voucherCode) {
         throw new AppError(400, 'OFFLINE_VOUCHER_NOT_ALLOWED', 'Los cupones de cambio solo se aceptan en línea.');
       }
-      const pricing = priceOrder(products, operation.payload.items);
+      const pricing = priceOrder(products, operation.payload.items, await db.getRawInventory());
       const now = new Date().toISOString();
       const inserted = await db.createOrder({
         id: operation.operationId,

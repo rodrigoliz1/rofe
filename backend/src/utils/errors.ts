@@ -32,7 +32,7 @@ export function errorHandler(error: unknown, req: Request, res: Response, _next:
   const providerType = error && typeof error === 'object' && 'type' in error ? String(error.type) : '';
   if (providerType.startsWith('Stripe')) error = new AppError(502, 'STRIPE_UNAVAILABLE', 'No pudimos confirmar la operación con el servicio de pago. Conserva tu pedido e intenta de nuevo en un momento.');
   if (/insufficient_available_inventory|insufficient_inventory|No hay inventario disponible/.test(databaseMessage)) error = new AppError(409, 'INSUFFICIENT_INVENTORY', 'No hay inventario disponible. Ajusta el pedido o solicita ayuda al equipo.');
-  if (/raw_inventory_reservations_check/.test(databaseMessage)) error = new AppError(409, 'INVENTORY_RESERVED', 'Estos insumos están reservados para un cobro pendiente. Finaliza o cancela ese cobro primero.');
+  if (/raw_inventory_reservations_check|El inventario está reservado/.test(databaseMessage)) error = new AppError(409, 'INVENTORY_RESERVED', 'Estos insumos están reservados para un cobro pendiente. Finaliza o cancela ese cobro primero.');
   if (/cash_session_required/.test(databaseMessage)) error = new AppError(409, 'CASH_SESSION_REQUIRED', 'Abre una sesión de caja antes de registrar este movimiento.');
   if (/insufficient_cash_denomination|Insufficient cash denomination/.test(databaseMessage)) error = new AppError(409, 'INSUFFICIENT_CASH', 'La caja no tiene esas denominaciones. Revisa el desglose del efectivo.');
   const bodyError = error as { type?: string; status?: number };
@@ -60,7 +60,7 @@ export function errorHandler(error: unknown, req: Request, res: Response, _next:
     code: appError.code,
     message: diagnosticMessage,
     errorType: diagnostic?.name ? String(diagnostic.name) : typeof error,
-    databaseCode: diagnostic?.code ? String(diagnostic.code) : undefined,
+    databaseCode: !(error instanceof AppError) && diagnostic?.code ? String(diagnostic.code) : undefined,
     constraint: diagnostic?.constraint ? String(diagnostic.constraint) : undefined,
     operation: req.path.includes('/cash/session/') ? 'cash_session' : undefined,
   }));

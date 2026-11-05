@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { db, type DbAdapter, type DbOrder, type DbPickupSettings } from '../db';
 import { orderItemInputSchema } from '../domain/orders';
 import { priceOrder } from '../domain/pricing';
+import { modifierAvailability, availableRecipeStock } from '../domain/modifiers';
 import { calculateRecipeConsumption } from '../domain/inventory';
 import type { PricedOrderItem } from '../domain/pricing';
 import { requireRole } from '../middleware/auth';
@@ -40,7 +41,7 @@ export function publicPickupOrder(order: DbOrder) {
     id: order.id, folio: order.folio, customerName: order.customerName,
     status: order.status, paymentStatus: order.paymentStatus, total: order.total,
     createdAt: order.createdAt, notes: order.notes,
-    items: order.items.map((item) => ({ productName: item.productName ?? item.product?.name, quantity: item.quantity, unitPrice: item.unitPrice, totalPrice: item.totalPrice, customizable: item.product?.customizable, customization: item.customization, selectedCustomVariants: item.selectedCustomVariants, modifiers: item.modifiers })),
+    items: order.items.map((item) => ({ productName: item.productName ?? item.product?.name, quantity: item.quantity, unitPrice: item.unitPrice, totalPrice: item.totalPrice, customizable: item.product?.customizable, customization: item.customization, selectedCustomVariants: item.selectedCustomVariants, quantitySelections: item.quantitySelections, preparation: item.preparation, modifiers: item.modifiers })),
     pickup: { locationName: order.pickup!.locationName, locationAddress: order.pickup!.locationAddress, expiresAt: order.pickup!.expiresAt },
   };
 }
@@ -94,10 +95,19 @@ export function registerPickupRoutes(app: express.Express, context: RouteContext
       res.json({ ...config, acceptingOrders: config.enabled && stripe.available(), currency: 'MXN',
         products: products.map((product) => {
           const recipe = Object.entries(product.recipe ?? {}).filter(([, amount]) => amount > 0);
-          const stock = recipe.length ? Math.max(0, Math.min(...recipe.map(([id, amount]) => { const item = ingredients.get(id); return item ? Math.floor((item.stock - (item.reservedStock ?? 0)) / amount) : 0; }))) : undefined;
-          return { id: product.id, name: product.name, description: product.description, price: product.price, category: product.category, icon: product.icon, customizable: product.customizable, image: product.image, custom_variants: product.custom_variants, stock };
+          const baseStock = recipe.length ? Math.max(0, Math.min(...recipe.map(([id, amount]) => { const item = ingredients.get(id); return item ? Math.floor((item.stock - (item.reservedStock ?? 0)) / amount) : 0; }))) : 0;
+          const stock = baseStock || availableRecipeStock(product, raw);
+          return { id: product.id, name: product.name, description: product.description, price: product.price, category: product.category, icon: product.icon, customizable: product.customizable, image: product.image, custom_variants: modifierAvailability(product, raw), stock };
         }),
       });
+    } catch (error) { next(error); }
+  });
+
+  app.post('/api/pickup/quote', rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false }), async (req, res, next) => {
+    try {
+      const input = z.object({ items: z.array(orderItemInputSchema).min(1).max(20) }).parse(req.body);
+      const pricing = priceOrder(await db.getProducts(), input.items, await db.getRawInventory());
+      res.json({ total: pricing.total, items: pricing.items.map(item => ({ productId: item.productId, unitPrice: item.unitPrice, totalPrice: item.totalPrice, preparation: item.preparation, modifiers: item.modifiers })) });
     } catch (error) { next(error); }
   });
 
@@ -110,7 +120,7 @@ export function registerPickupRoutes(app: express.Express, context: RouteContext
       if (!order) {
         const config = await settings();
         if (!config.enabled || !stripe.available()) throw new AppError(503, 'PICKUP_UNAVAILABLE', 'Los pedidos en línea no están disponibles en este momento. Puedes pedir directamente en barra.');
-        const pricing = priceOrder(await db.getProducts(), input.items);
+        const pricing = priceOrder(await db.getProducts(), input.items, await db.getRawInventory());
         if (pricing.total <= 0 || pricing.total > 10_000) throw new AppError(400, 'PICKUP_INVALID_TOTAL', 'El pedido debe tener un importe mayor a cero y de hasta $10,000 MXN.');
         const candidate: DbOrder = {
           id: input.operationId, operationId: input.operationId, folio: `Q-${input.operationId.replace(/-/g, '').slice(0, 10).toUpperCase()}`,

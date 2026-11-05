@@ -10,10 +10,11 @@ export function toOrderItemInputs(items: CartItem[]) {
     quantity: item.quantity,
     customization: item.customization,
     selectedCustomVariants: item.selectedCustomVariants,
+    quantitySelections: item.quantitySelections,
   }));
 }
 
 /** Full, sorted selections avoid collisions and support non-Latin option names. */
-export function configuredItemId(productId: string, customization: CartItem['customization'], variants: Record<string, string> = {}): string {
-  return JSON.stringify([productId, Object.entries(customization).sort(([a], [b]) => a.localeCompare(b)), Object.entries(variants).sort(([a], [b]) => a.localeCompare(b))]);
+export function configuredItemId(productId: string, customization: CartItem['customization'], variants: Record<string, string> = {}, counts: Record<string, number> = {}): string {
+  return JSON.stringify([productId, Object.entries(customization).sort(([a], [b]) => a.localeCompare(b)), Object.entries(variants).sort(([a], [b]) => a.localeCompare(b)), Object.entries(counts).filter(([, value]) => value !== 0).sort(([a], [b]) => a.localeCompare(b))]);
 }

@@ -3,6 +3,7 @@ import { apiUrl } from '../services/api';
 import { useDialogFocus } from '../hooks/useDialogFocus';
 import type { Product, CustomVariantGroup } from '../types';
 import { productPhoto } from '../services/productImages';
+import { ModifierEditor } from './ModifierEditor';
 
 interface RawInventoryItem {
   id: string;
@@ -53,9 +54,10 @@ export const ProductEditorModal: React.FC<ProductEditorModalProps> = ({ product,
 
   const handleAddRecipeItem = () => {
     if (rawInventory.length === 0) return;
-    const firstId = rawInventory[0].id;
+    const firstId = rawInventory.find(item => !(item.id in recipe))?.id;
+    if (!firstId) return;
     if (!recipe[firstId]) {
-      setRecipe({ ...recipe, [firstId]: 1 });
+      setRecipe({ ...recipe, [firstId]: 0 });
     }
   };
 
@@ -72,43 +74,6 @@ export const ProductEditorModal: React.FC<ProductEditorModalProps> = ({ product,
     const newRecipe = { ...recipe };
     delete newRecipe[id];
     setRecipe(newRecipe);
-  };
-
-  const handleAddVariantGroup = () => {
-    setCustomVariants([...customVariants, { title: 'Nuevo Grupo', options: [] }]);
-  };
-
-  const updateVariantGroupTitle = (index: number, title: string) => {
-    const newVariants = [...customVariants];
-    newVariants[index].title = title;
-    setCustomVariants(newVariants);
-  };
-
-  const addVariantOption = (groupIndex: number) => {
-    const newVariants = [...customVariants];
-    newVariants[groupIndex].options.push({ name: 'Opción', priceModifier: 0 });
-    setCustomVariants(newVariants);
-  };
-
-  const updateVariantOption = (groupIndex: number, optionIndex: number, field: 'name' | 'priceModifier', value: string | number) => {
-    const newVariants = [...customVariants];
-    newVariants[groupIndex].options[optionIndex] = {
-      ...newVariants[groupIndex].options[optionIndex],
-      [field]: value as never
-    };
-    setCustomVariants(newVariants);
-  };
-
-  const removeVariantOption = (groupIndex: number, optionIndex: number) => {
-    const newVariants = [...customVariants];
-    newVariants[groupIndex].options.splice(optionIndex, 1);
-    setCustomVariants(newVariants);
-  };
-
-  const removeVariantGroup = (groupIndex: number) => {
-    const newVariants = [...customVariants];
-    newVariants.splice(groupIndex, 1);
-    setCustomVariants(newVariants);
   };
 
   const handleSave = async () => {
@@ -162,7 +127,7 @@ export const ProductEditorModal: React.FC<ProductEditorModalProps> = ({ product,
 
             <label style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 15, cursor: 'pointer' }}>
               <input type="checkbox" checked={customizable} onChange={e => setCustomizable(e.target.checked)} style={{ width: 20, height: 20 }} />
-              Permitir Personalización Clásica (Tamaño, Leche, Dulzor, etc.)
+              Permitir personalizaciones configuradas
             </label>
           </div>
 
@@ -214,50 +179,8 @@ export const ProductEditorModal: React.FC<ProductEditorModalProps> = ({ product,
           </div>
         </div>
 
-        <div style={{ background: '#2c2c2c', padding: 15, borderRadius: 8, marginBottom: 20 }}>
-          <h4 style={{ margin: '0 0 10px 0' }}>Variantes Personalizadas (Ej. Pumps, Sabores extra)</h4>
-          {customVariants.map((group, gIndex) => (
-            <div key={gIndex} style={{ border: '1px solid #444', padding: 15, borderRadius: 8, marginBottom: 15 }}>
-              <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
-                <input 
-                  className="admin-input-text" 
-                  style={{ flex: 1 }} 
-                  placeholder="Título del Grupo (Ej. Pumps)" 
-                  value={group.title} 
-                  onChange={e => updateVariantGroupTitle(gIndex, e.target.value)} 
-                />
-                <button className="action-btn-small delete" onClick={() => removeVariantGroup(gIndex)}>Eliminar Grupo</button>
-              </div>
-              
-              <div style={{ paddingLeft: 20 }}>
-                {group.options.map((opt, oIndex) => (
-                  <div key={oIndex} style={{ display: 'flex', gap: 10, marginBottom: 5 }}>
-                    <input 
-                      className="admin-input-text" 
-                      style={{ flex: 1, padding: 5 }} 
-                      placeholder="Nombre (Ej. Vainilla)" 
-                      value={opt.name} 
-                      onChange={e => updateVariantOption(gIndex, oIndex, 'name', e.target.value)} 
-                    />
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                      <span>+$</span>
-                      <input 
-                        type="number" 
-                        className="admin-input-text" 
-                        style={{ width: 70, padding: 5 }} 
-                        value={opt.priceModifier} 
-                        onChange={e => updateVariantOption(gIndex, oIndex, 'priceModifier', parseFloat(e.target.value))} 
-                      />
-                    </div>
-                    <button className="action-btn-small delete" onClick={() => removeVariantOption(gIndex, oIndex)}>&times;</button>
-                  </div>
-                ))}
-                <button className="action-btn-small" style={{ marginTop: 10 }} onClick={() => addVariantOption(gIndex)}>+ Añadir Opción</button>
-              </div>
-            </div>
-          ))}
-          <button className="action-btn-small" onClick={handleAddVariantGroup}>+ Añadir Grupo de Variantes</button>
-        </div>
+
+        <ModifierEditor groups={customVariants} onChange={setCustomVariants} inventory={rawInventory} recipe={recipe} />
 
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 20, paddingTop: 20, borderTop: '1px solid #444' }}>
           {product && onDelete ? (

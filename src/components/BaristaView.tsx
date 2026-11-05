@@ -117,6 +117,7 @@ export const BaristaView: React.FC<BaristaViewProps> = ({ orders, onUpdateOrderS
   };
 
   const getCustomizationSummary = (item: CartItem): string => {
+    if (item.preparation) return item.preparation.join(" · ") || "Receta de la casa";
     const details = [
       item.customization.size !== 'regular' ? item.customization.size : '',
       item.customization.milk !== 'none' ? `leche ${item.customization.milk}` : '',
