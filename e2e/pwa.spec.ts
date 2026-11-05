@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { expect, test, devices } from '@playwright/test';
 
 test('production manifest and installation resources have valid responses', async ({ request }) => {
@@ -67,4 +68,23 @@ test('kiosk uses the enrolled POS on cold start even after staff access', async 
   await page.reload();
   await expect(page.getByText('ORDENAR AQUÍ')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'ROFE Admin' })).toHaveCount(0);
+});
+
+test('catalog photos are cached by the service worker and still load offline', async ({ browser }) => {
+  const manifest = JSON.parse(readFileSync('src/kiosk/productImages.json', 'utf8')) as { products: Record<string, { card?: Record<string, { url: string }> }> };
+  const photo = Object.values(manifest.products.espresso.card!)[0].url;
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, baseURL: 'http://127.0.0.1:4173', serviceWorkers: 'allow' });
+  try {
+    const page = await context.newPage();
+    await page.goto('/kiosk');
+    await page.waitForFunction(() => navigator.serviceWorker.controller?.state === 'activated');
+    expect(await page.evaluate(async (url) => (await fetch(url)).status, photo)).toBe(200);
+    await expect.poll(() => page.evaluate(async (url) => Boolean(await (await caches.open('rofe-photos-v1')).match(url)), photo)).toBe(true);
+    // The shell cache and the photo cache are separate: an app update never evicts photos.
+    expect(await page.evaluate(() => caches.keys())).toEqual(expect.arrayContaining(['rofe-photos-v1']));
+    await context.setOffline(true);
+    expect(await page.evaluate(async (url) => { const response = await fetch(url); return [response.status, (await response.blob()).type]; }, photo)).toEqual([200, 'image/webp']);
+    // API responses are never cached by the worker.
+    expect(await page.evaluate(() => fetch('/api/products').then(() => 'online', () => 'blocked'))).toBe('blocked');
+  } finally { await context.close(); }
 });

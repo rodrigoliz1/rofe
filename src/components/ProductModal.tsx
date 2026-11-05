@@ -4,11 +4,14 @@ import { configuredItemId } from '../utils/cart';
 import { useDialogFocus } from '../hooks/useDialogFocus';
 import { useBackHandler } from '../kiosk/backStack';
 import { ProductIcon } from './Icons';
+import { productPhoto } from '../services/productImages';
 
 interface ProductModalProps {
   product: Product;
   onClose: () => void;
   onAddToCart: (item: CartItem) => void;
+  /** Kiosk: show the catalog photo at the top of the sheet. */
+  showPhoto?: boolean;
 }
 
 const DEFAULT_CUSTOMIZATION: CustomizationOptions = {
@@ -23,7 +26,9 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   product,
   onClose,
   onAddToCart,
+  showPhoto = false,
 }) => {
+  const photo = showPhoto ? productPhoto(product).detail : null;
   const dialogRef = useDialogFocus(onClose);
   useBackHandler(true, () => { onClose(); return true; });
   const [customization, setCustomization] = useState<CustomizationOptions>({
@@ -129,6 +134,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
         </div>
 
         <div className="modal-body">
+          {photo && <div className="modal-photo"><img src={photo} alt="" width={960} height={960} decoding="async" draggable={false} /></div>}
           {isCoffeeOrCold ? (
             <>
               {/* SIZE OPTION */}

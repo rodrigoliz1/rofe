@@ -1,0 +1,76 @@
+{
+  "style": "Hyperrealistic advertising product photograph for a premium espresso bar menu. Square 1:1 frame, product centered and filling about 60% of the frame, camera at a three-quarter angle slightly above the subject, same scale and perspective for every product. Soft diffused studio key light from the left, gentle fill, subtle soft shadow. Seamless warm neutral background in beige and cream with a soft gradient, matte light stone surface. Minimalist composition, realistic textures, appetizing. No text, no logos, no brands, no people, no faces, no hands, no props or decorations beyond what is described.",
+  "products": {
+    "espresso": {
+      "name": "Espresso",
+      "status": "approved",
+      "source": "public/espresso.webp",
+      "focus": {
+        "x": 0.53,
+        "y": 0.6,
+        "scale": 0.82
+      },
+      "prompt": "A double espresso in a small white ceramic demitasse on a matching saucer, thick golden-hazelnut crema with fine tiger striping, a few drops of crema on the rim, nothing else on the surface."
+    },
+    "americano": {
+      "name": "Americano",
+      "status": "approved",
+      "source": "public/americano.webp",
+      "focus": {
+        "x": 0.45,
+        "y": 0.5
+      },
+      "prompt": "An americano in a clear double-walled glass mug, deep brown coffee with a thin light crema on top, visible transparency of the glass, nothing else on the surface."
+    },
+    "latte": {
+      "name": "Latte",
+      "status": "pending",
+      "note": "No hay fotografía de un latte caliente: la anterior era la del iced latte. Se muestra la ilustración de marca hasta aprobar una foto.",
+      "prompt": "A hot café latte in a wide cream-colored ceramic cup on a saucer, glossy microfoam with a symmetrical rosetta latte art, warm caramel-brown edges, light steam, nothing else on the surface."
+    },
+    "matcha-latte": {
+      "name": "Matcha latte",
+      "status": "approved",
+      "source": "public/matcha-latte.jpg",
+      "prompt": "A hot matcha latte in a white ceramic cup, vivid jade-green surface with white leaf latte art, velvety microfoam, nothing else on the surface."
+    },
+    "cold-brew": {
+      "name": "Cold brew",
+      "status": "approved",
+      "source": "public/cold-brew.webp",
+      "focus": {
+        "x": 0.5,
+        "y": 0.55
+      },
+      "note": "Aprobada temporalmente: muestra parte de un delantal y la mano que sirve. Sustituir por una foto con el estilo maestro.",
+      "prompt": "A cold brew coffee in a tall clear tumbler with large clear ice cubes, deep amber-mahogany color with light passing through, tiny condensation droplets on the glass, nothing else on the surface."
+    },
+    "iced-latte": {
+      "name": "Iced latte",
+      "status": "approved",
+      "source": "public/iced-latte.webp",
+      "focus": {
+        "x": 0.45,
+        "y": 0.47
+      },
+      "prompt": "An iced latte in a tall clear glass with ice cubes, milk and espresso gently layered from cream to caramel brown, a clear glass straw, light condensation, nothing else on the surface."
+    },
+    "croissant-mantequilla": {
+      "name": "Croissant de mantequilla",
+      "status": "pending",
+      "note": "La única foto disponible (pan-chocolate.jpg) muestra panes de chocolate, no un croissant de mantequilla. Se muestra la ilustración de marca hasta aprobar una foto.",
+      "prompt": "A single golden butter croissant with crisp flaky laminated layers and a glossy egg-washed crust, resting on a small cream ceramic plate, a few flakes of pastry on the surface."
+    },
+    "galleta-chocolate": {
+      "name": "Galleta de chocolate",
+      "status": "approved",
+      "source": "public/galleta-chispas.jpeg",
+      "focus": {
+        "x": 0.44,
+        "y": 0.62,
+        "scale": 0.9
+      },
+      "prompt": "Two soft-baked chocolate chip cookies stacked slightly offset, golden edges, melted dark chocolate chunks, a light dusting of flaky sea salt, on parchment over the stone surface."
+    }
+  }
+}

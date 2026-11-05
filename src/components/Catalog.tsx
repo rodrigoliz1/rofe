@@ -1,40 +1,50 @@
 import React, { useState } from 'react';
 import type { Product } from '../types';
 import { ProductIcon } from './Icons';
-import { apiUrl } from '../services/api';
+import { productPhoto } from '../services/productImages';
+import { isImageReady } from '../services/imagePreload';
 import { UiIcon } from './UiIcon';
 
 interface ProductCardImageProps {
-  src: string;
-  alt: string;
-  icon: string;
+  product: Product;
   priority?: boolean;
 }
 
-const ProductCardImage: React.FC<ProductCardImageProps> = ({ src, alt, icon, priority = false }) => {
-  const [hasError, setHasError] = useState(false);
+/**
+ * Card photo with a stable square box: the skeleton occupies the exact final size, so
+ * nothing jumps when the photo arrives. Photos already preloaded on the welcome screen
+ * render immediately; the rest fade in quickly. Pending/missing photos show the brand
+ * illustration instead of a wrong picture.
+ */
+const ProductCardImage: React.FC<ProductCardImageProps> = ({ product, priority = false }) => {
+  const photo = productPhoto(product);
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const [loadedUrl, setLoadedUrl] = useState<string | null>(() => isImageReady(photo.card) ? photo.card : null);
+  const src = photo.card;
 
-  if (hasError || !src) {
+  if (!src || failedUrl === src) {
     return (
-      <div className="product-card-icon-wrapper">
-        <ProductIcon name={icon} className="product-card-icon" size={40} />
+      <div className="product-card-icon-wrapper" data-photo={photo.source}>
+        <ProductIcon name={product.icon} className="product-card-icon" size={40} />
       </div>
     );
   }
 
+  const loaded = loadedUrl === src || isImageReady(src);
   return (
-    <div className="product-card-image-wrapper">
+    <div className={`product-card-image-wrapper${loaded ? ' is-loaded' : ''}`} data-photo={photo.source}>
       <img
-        src={src.startsWith('/api/') ? apiUrl(src) : src}
-        alt={alt}
+        src={src}
+        alt=""
         className="product-card-image"
-        width={480}
-        height={360}
+        width={640}
+        height={640}
         decoding="async"
         loading={priority ? 'eager' : 'lazy'}
         fetchPriority={priority ? 'high' : 'auto'}
         draggable={false}
-        onError={() => setHasError(true)}
+        onLoad={() => setLoadedUrl(src)}
+        onError={() => setFailedUrl(src)}
       />
     </div>
   );
@@ -103,7 +113,7 @@ export const Catalog: React.FC<CatalogProps> = ({
                 }
               }}
             >
-              <ProductCardImage src={product.image || ''} alt={product.name} icon={product.icon} priority={index < priorityImages} />
+              <ProductCardImage product={product} priority={index < priorityImages} />
               {isDepleted && <div className="depleted-badge">AGOTADO</div>}
               <div className="product-card-info">
                 <h3 className="product-card-name">{product.name}</h3>

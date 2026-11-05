@@ -1,7 +1,6 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import type { CartItem, Order, Product } from '../types';
 import { Catalog } from '../components/Catalog';
-import { Cart } from '../components/Cart';
 import { ProductModal } from '../components/ProductModal';
 import { CheckoutModal } from '../components/CheckoutModal';
 import { ConnectionStatus } from '../components/ConnectionStatus';
@@ -15,6 +14,8 @@ import { useStackedLayout } from './useMediaQuery';
 import { useReachability } from './useReachability';
 import { postNative, vibrate } from './nativeBridge';
 import { KioskDialog } from './KioskDialog';
+import { KioskCartDrawer } from './KioskCartDrawer';
+import { useCatalogPreload } from './useCatalogPreload';
 
 const money = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' });
 
@@ -88,7 +89,9 @@ export function KioskTerminal(props: KioskTerminalProps) {
   const itemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
   const total = cart.reduce((sum, item) => sum + item.totalPrice, 0);
   const partialOrder = cart.length > 0 || Boolean(selectedProduct) || showCheckout;
-  const sheetRef = useRef<HTMLElement>(null);
+  const [added, setAdded] = useState<{ name: string; key: number } | null>(null);
+  // Photos start downloading while the welcome screen is shown, not on «ORDENAR AQUÍ».
+  useCatalogPreload(props.products, stacked);
 
   const reset = useCallback(() => {
     setCartOpen(false); setIdlePrompt(false); setConfirmCancel(false);
@@ -101,9 +104,12 @@ export function KioskTerminal(props: KioskTerminalProps) {
     if (partialOrder) setIdlePrompt(true); else reset();
   });
 
-  // The sheet only exists in the stacked layout; an empty order has nothing to show.
-  useEffect(() => { if (cart.length === 0) setCartOpen(false); }, [cart.length]);
-  useEffect(() => { if (cartOpen && stacked) sheetRef.current?.focus(); }, [cartOpen, stacked]);
+  // "Agregado" feedback; the order panel never opens by itself.
+  useEffect(() => {
+    if (!added) return;
+    const timer = window.setTimeout(() => setAdded(null), 1_800);
+    return () => window.clearTimeout(timer);
+  }, [added]);
 
   // Root of the back stack: dialogs register above it. Never leaves the app.
   useBackHandler(true, () => {
@@ -113,36 +119,34 @@ export function KioskTerminal(props: KioskTerminalProps) {
     return true;
   });
 
-  const addToCart = useCallback((item: CartItem) => { vibrate(18, settings.haptics); props.onAddToCart(item); }, [props, settings.haptics]);
+  const { onAddToCart } = props;
+  const addToCart = useCallback((item: CartItem) => {
+    vibrate(18, settings.haptics);
+    onAddToCart(item);
+    setAdded({ name: item.product.name, key: Date.now() });
+  }, [onAddToCart, settings.haptics]);
   const checkout = () => { setCartOpen(false); props.onOpenCheckout(); };
 
-  return <div className="kiosk-terminal" data-stacked={stacked} data-cart-open={stacked && cartOpen}>
+  return <div className="kiosk-terminal" data-stacked={stacked} data-cart-open={cartOpen}>
     {!started && <KioskWelcome onStart={props.onStart} onStaffAccess={props.onStaffAccess} />}
     {started && <>
-      <header className="kiosk-header">
+      <header className="kiosk-header" inert={cartOpen}>
         <div className="kiosk-header-brand" {...admin}><span className="kiosk-logo kiosk-logo-small">ROFÉ<span aria-hidden="true">.</span></span><span className="kiosk-header-label">Espresso bar</span></div>
         {props.appError && <p className="kiosk-toast" role="status">{props.appError}<button type="button" onClick={props.onRetryCatalog}>Reintentar</button><button type="button" aria-label="Cerrar mensaje" onClick={props.onDismissError}>×</button></p>}
         <ConnectionStatus {...props.connection} />
-      </header>
-      <div className="kiosk-main">
-        <section className="kiosk-catalog" aria-label="Menú">
-          <Catalog products={props.products} loading={props.catalogLoading} onRetry={props.onRetryCatalog} selectedCategory={props.category} onSelectCategory={props.onSelectCategory} onProductClick={props.onSelectProduct} showSearch={false} priorityImages={6} />
-        </section>
-        {stacked && cartOpen && <button type="button" className="kiosk-sheet-backdrop" aria-label="Cerrar pedido" onClick={() => setCartOpen(false)} />}
-        <aside ref={sheetRef} className="kiosk-cart" aria-label="Tu pedido" tabIndex={-1} inert={stacked && !cartOpen}>
-          {stacked && <button type="button" className="kiosk-sheet-handle" onClick={() => setCartOpen(false)} aria-label="Ocultar pedido"><span aria-hidden="true" /></button>}
-          <Cart cart={cart} onRemoveItem={props.onRemoveItem} onUpdateQty={props.onUpdateQty} onCheckout={checkout} onCancelOrder={() => setConfirmCancel(true)} />
-        </aside>
-      </div>
-      {stacked && <div className="kiosk-cart-bar">
-        <button type="button" className="kiosk-cart-summary" onClick={() => setCartOpen(true)} disabled={cart.length === 0} aria-expanded={cartOpen}>
-          <span className="kiosk-cart-count" aria-hidden="true">{itemCount}</span>
-          <span><strong>{cart.length === 0 ? 'Tu pedido está vacío' : 'Ver pedido'}</strong><small>{itemCount === 1 ? '1 artículo' : `${itemCount} artículos`} · {money.format(total)}</small></span>
+        <button type="button" className="kiosk-order-button" onClick={() => setCartOpen(true)} aria-haspopup="dialog" aria-expanded={cartOpen} aria-label={itemCount === 0 ? 'Tu pedido, vacío' : `Tu pedido, ${itemCount} ${itemCount === 1 ? 'artículo' : 'artículos'}, ${money.format(total)}`}>
+          <UiIcon name="bag" size={22} />
+          <span className="kiosk-order-label">TU PEDIDO</span>
+          {itemCount > 0 && <span key={itemCount} className="kiosk-order-count" aria-hidden="true">{itemCount}</span>}
         </button>
-        <button type="button" className="kiosk-primary kiosk-cart-cta" onClick={checkout} disabled={cart.length === 0}>Continuar<UiIcon name="arrow" size={22} /></button>
-      </div>}
+      </header>
+      <section className="kiosk-catalog" aria-label="Menú" inert={cartOpen}>
+        <Catalog products={props.products} loading={props.catalogLoading} onRetry={props.onRetryCatalog} selectedCategory={props.category} onSelectCategory={props.onSelectCategory} onProductClick={props.onSelectProduct} showSearch={false} priorityImages={8} />
+      </section>
+      {added && <p key={added.key} className="kiosk-added" role="status"><UiIcon name="check" size={18} />Agregado · {added.name}</p>}
+      {cartOpen && <KioskCartDrawer cart={cart} total={total} stacked={stacked} onClose={() => setCartOpen(false)} onRemoveItem={props.onRemoveItem} onUpdateQty={props.onUpdateQty} onCheckout={checkout} onCancelOrder={() => setConfirmCancel(true)} />}
     </>}
-    {selectedProduct && <ProductModal product={selectedProduct} onClose={() => props.onSelectProduct(null)} onAddToCart={addToCart} />}
+    {selectedProduct && <ProductModal product={selectedProduct} showPhoto onClose={() => props.onSelectProduct(null)} onAddToCart={addToCart} />}
     {showCheckout && <CheckoutModal total={total} cartItems={cart} orders={props.orders} kiosk={settings} onLockChange={setPaymentLocked} onPaymentSuccess={reset} onClose={props.onCloseCheckout} />}
     {!reachable && !showCheckout && <KioskOffline />}
     {confirmCancel && <KioskDialog title="¿Cancelar tu pedido?" description="Se quitarán todos los productos." primary={{ label: 'Seguir pidiendo', onClick: () => setConfirmCancel(false) }} secondary={{ label: 'Cancelar pedido', onClick: reset }} />}
