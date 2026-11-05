@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- app_name is defined per build type in app/build.gradle.kts -->
+    <string name="brand_description">ROFÉ Espresso Bar</string>
+    <string name="brand_kicker">ESPRESSO BAR</string>
+
+    <string name="status_connecting_title">Conectando con ROFÉ…</string>
+    <string name="status_slow_message">Está tardando más de lo normal. Revisa el Wi-Fi o reintenta.</string>
+    <string name="status_offline_title">Sin conexión</string>
+    <string name="status_error_title">No pudimos conectar con ROFÉ</string>
+    <string name="status_retrying_message">Estamos intentando reconectar automáticamente.</string>
+    <string name="status_retry">Intentar de nuevo</string>
+    <string name="status_config_title">Configuración incompleta</string>
+    <string name="status_config_message">La dirección de ROFÉ configurada no es válida (%1$s). Un administrador debe revisarla.</string>
+
+    <string name="admin_pin_title">Administración ROFÉ</string>
+    <string name="admin_pin_hint">PIN administrativo</string>
+    <string name="admin_pin_wrong">PIN incorrecto</string>
+    <string name="admin_locked">Demasiados intentos. Espera %1$s segundos.</string>
+    <string name="admin_enter">Entrar</string>
+    <string name="admin_cancel">Cancelar</string>
+    <string name="admin_ok">Entendido</string>
+    <string name="admin_save">Guardar</string>
+    <string name="admin_continue">Continuar</string>
+    <string name="admin_close">Cerrar</string>
+    <string name="admin_create_pin_title">Crea el PIN administrativo</string>
+    <string name="admin_create_pin_intro">Este PIN protege la salida del modo kiosco. Usa de 6 a 12 dígitos y no lo compartas con clientes.</string>
+    <string name="admin_change_pin_intro">Escribe el nuevo PIN dos veces.</string>
+    <string name="admin_new_pin_hint">Nuevo PIN (6 a 12 dígitos)</string>
+    <string name="admin_repeat_pin_hint">Repite el PIN</string>
+    <string name="admin_pin_rules">Usa de 6 a 12 dígitos.</string>
+    <string name="admin_pin_mismatch">Los PIN no coinciden.</string>
+    <string name="admin_pin_saved">PIN guardado</string>
+
+    <string name="admin_menu_title">Administración ROFÉ</string>
+    <string name="admin_back_to_kiosk">Volver al kiosco</string>
+    <string name="admin_reload">Recargar ROFÉ</string>
+    <string name="admin_new_customer">Nueva sesión de cliente (vaciar pedido)</string>
+    <string name="admin_staff_access">Acceso de equipo (barista / administración)</string>
+    <string name="admin_wifi">Configurar Wi-Fi</string>
+    <string name="admin_temporary_exit">Salir temporalmente del modo kiosco (10 min)</string>
+    <string name="admin_temporary_exit_done">Modo kiosco suspendido 10 minutos. Vuelve con «Volver al kiosco».</string>
+    <string name="admin_kiosk_on">Modo kiosco: activado (tocar para desactivar)</string>
+    <string name="admin_kiosk_off">Modo kiosco: desactivado (tocar para activar)</string>
+    <string name="admin_autostart_on">Abrir al encender: sí</string>
+    <string name="admin_autostart_off">Abrir al encender: no</string>
+    <string name="admin_haptics_on">Vibración al confirmar: sí</string>
+    <string name="admin_haptics_off">Vibración al confirmar: no</string>
+    <string name="admin_set_home">Usar ROFÉ como pantalla de inicio</string>
+    <string name="admin_battery">Optimización de batería</string>
+    <string name="admin_android_settings">Ajustes de Android</string>
+    <string name="admin_restart_webview">Reiniciar WebView</string>
+    <string name="admin_clear_cache">Limpiar caché</string>
+    <string name="admin_clear_data">Borrar datos locales</string>
+    <string name="admin_clear_data_warning">Se borran cookies, sesión y datos guardados por ROFÉ en esta tablet, incluido el registro de la terminal. Tendrás que registrarla otra vez con la clave de registro.</string>
+    <string name="admin_change_pin">Cambiar PIN</string>
+    <string name="admin_debug_url">Cambiar URL (solo debug)</string>
+    <string name="admin_debug_url_help">Por ejemplo http://192.168.0.10:5173/kiosk. Solo builds debug.</string>
+    <string name="admin_debug_url_reset">Restaurar</string>
+    <string name="admin_remove_owner">Quitar Device Owner (desarrollo)</string>
+    <string name="admin_remove_owner_warning">ROFÉ dejará de ser el propietario del dispositivo y el bloqueo total desaparecerá. Para volver a activarlo hay que repetir el aprovisionamiento por ADB.</string>
+</resources>

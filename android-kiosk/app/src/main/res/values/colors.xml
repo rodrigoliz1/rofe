@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ROFÉ brand (public/favicon.svg, src/styles/foundation.css) -->
+    <color name="rofe_background">#111311</color>
+    <color name="rofe_surface">#1A1A1F</color>
+    <color name="rofe_ink">#F4F0E5</color>
+    <color name="rofe_gold">#DEC997</color>
+    <color name="rofe_muted">#9A948C</color>
+</resources>

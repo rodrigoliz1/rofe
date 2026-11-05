@@ -1,0 +1,162 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.net.URI
+
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+}
+
+/** -Profe.x=…, then the ROFE_X environment variable, then gradle.properties / the default. */
+fun setting(name: String, default: String = ""): String {
+    val env = "ROFE_" + name.removePrefix("rofe.").replace(Regex("([a-z])([A-Z])"), "$1_$2").uppercase()
+    return providers.gradleProperty(name).orNull?.takeIf { it.isNotBlank() }
+        ?: providers.environmentVariable(env).orNull?.takeIf { it.isNotBlank() }
+        ?: default
+}
+
+fun kioskUrl(name: String, requireHttps: Boolean): String {
+    val value = setting(name)
+    val uri = runCatching { URI(value) }.getOrNull()
+    require(uri?.host != null && uri.scheme in setOf("https", "http")) { "$name debe ser una URL completa, por ejemplo https://rofe.vercel.app/kiosk (recibido: '$value')." }
+    require(!requireHttps || uri!!.scheme == "https") { "$name debe usar HTTPS: las builds staging y release no permiten tráfico sin cifrar." }
+    return value
+}
+
+fun quoted(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
+// Release signing comes only from the environment / CI secrets. Nothing is committed.
+val keystoreFile = setting("rofe.keystoreFile")
+val releaseSigningAvailable = keystoreFile.isNotEmpty() && file(keystoreFile).exists()
+
+android {
+    namespace = "com.rofe.kiosk"
+    compileSdk = 35
+
+    defaultConfig {
+        applicationId = "com.rofe.kiosk"
+        minSdk = 26
+        targetSdk = 35
+        versionCode = setting("rofe.versionCode", "1").toInt()
+        versionName = setting("rofe.versionName", "1.0.0")
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "EXTRA_ALLOWED_HOSTS", quoted(setting("rofe.extraHosts", "*.supabase.co")))
+        buildConfigField("int", "IDLE_SECONDS", setting("rofe.idleSeconds", "90").toInt().coerceIn(20, 900).toString())
+        // Optional initial admin PIN ("iterations:salt:hash"), produced by ./gradlew :app:hashPin -Ppin=…
+        // Without it, the first admin long-press asks the operator to create the PIN on the device.
+        buildConfigField("String", "ADMIN_PIN_HASH", quoted(setting("rofe.adminPinHash")))
+    }
+
+    signingConfigs {
+        if (releaseSigningAvailable) {
+            create("release") {
+                storeFile = file(keystoreFile)
+                storePassword = setting("rofe.keystorePassword")
+                keyAlias = setting("rofe.keyAlias")
+                keyPassword = setting("rofe.keyPassword")
+                enableV1Signing = false
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+            resValue("string", "app_name", "ROFÉ Debug")
+            buildConfigField("String", "KIOSK_URL", quoted(kioskUrl("rofe.debugUrl", requireHttps = false)))
+            // Only debug may load http:// (e.g. http://192.168.x.x:5173/kiosk on the LAN).
+            buildConfigField("boolean", "ALLOW_CLEARTEXT", "true")
+            // Development: a normal app until the admin enables kiosk mode from the menu.
+            buildConfigField("boolean", "LOCK_TASK_DEFAULT", "false")
+        }
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            resValue("string", "app_name", "ROFÉ")
+            buildConfigField("String", "KIOSK_URL", quoted(kioskUrl("rofe.releaseUrl", requireHttps = true)))
+            buildConfigField("boolean", "ALLOW_CLEARTEXT", "false")
+            buildConfigField("boolean", "LOCK_TASK_DEFAULT", "true")
+            signingConfig = if (releaseSigningAvailable) signingConfigs.getByName("release") else null
+        }
+        create("staging") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".staging"
+            versionNameSuffix = "-staging"
+            matchingFallbacks += listOf("release")
+            resValue("string", "app_name", "ROFÉ Staging")
+            buildConfigField("String", "KIOSK_URL", quoted(kioskUrl("rofe.stagingUrl", requireHttps = true)))
+            // Installable for QA without the production key; release keeps its own signature.
+            signingConfig = if (releaseSigningAvailable) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
+        }
+    }
+
+    buildFeatures {
+        buildConfig = true
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all { it.systemProperty("robolectric.logging.enabled", "true") }
+    }
+
+    lint {
+        abortOnError = true
+        checkReleaseBuilds = true
+        // A dedicated-device app is never published on Google Play.
+        disable += setOf("ExpiredTargetSdkVersion", "GradleDependency", "NewerVersionAvailable", "AndroidGradlePluginVersion", "OldTargetApi")
+    }
+
+    packaging {
+        resources.excludes += setOf("META-INF/AL2.0", "META-INF/LGPL2.1")
+    }
+}
+
+kotlin {
+    compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
+}
+
+dependencies {
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.appcompat)
+    implementation(libs.androidx.activity.ktx)
+    implementation(libs.androidx.webkit)
+    implementation(libs.androidx.core.splashscreen)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core.ktx)
+    testImplementation(libs.androidx.test.ext.junit.ktx)
+
+    androidTestImplementation(libs.androidx.test.ext.junit.ktx)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.rules)
+    androidTestImplementation(libs.androidx.espresso.core)
+    androidTestImplementation(libs.androidx.uiautomator)
+}
+
+/** ./gradlew :app:hashPin -Ppin=482915  →  prints a value for rofe.adminPinHash (never the PIN). */
+tasks.register("hashPin") {
+    group = "rofe"
+    description = "Genera el hash PBKDF2 de un PIN administrativo para rofe.adminPinHash."
+    val pin = providers.gradleProperty("pin")
+    doLast {
+        val value = pin.orNull ?: error("Indica el PIN: ./gradlew :app:hashPin -Ppin=123456")
+        require(value.length in 6..12 && value.all(Char::isDigit)) { "El PIN debe tener entre 6 y 12 dígitos." }
+        val iterations = 120_000
+        val salt = ByteArray(16).also { java.security.SecureRandom().nextBytes(it) }
+        val spec = javax.crypto.spec.PBEKeySpec(value.toCharArray(), salt, iterations, 256)
+        val hash = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
+        spec.clearPassword()
+        val encoder = java.util.Base64.getEncoder()
+        println("rofe.adminPinHash=$iterations:${encoder.encodeToString(salt)}:${encoder.encodeToString(hash)}")
+    }
+}
