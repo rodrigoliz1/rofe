@@ -29,7 +29,7 @@ declare global {
 export const WEB_VERSION = typeof __ROFE_WEB_VERSION__ === 'string' ? __ROFE_WEB_VERSION__ : 'dev';
 
 export function isNativeShell(): boolean {
-  return typeof window.rofeNative?.postMessage === 'function' || /\bROFEKiosk\//.test(navigator.userAgent);
+  return typeof window.rofeNative?.postMessage === 'function' || /\bROFE(?:Kiosk|Barista)\//.test(navigator.userAgent);
 }
 
 /** Returns false when no native shell is listening (plain browser or PWA). */

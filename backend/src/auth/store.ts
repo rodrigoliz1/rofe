@@ -304,6 +304,6 @@ export function createSecurityStore(env: AppEnv): SecurityStore {
   if (env.NODE_ENV === 'production') {
     throw new Error('Producción requiere Supabase para sesiones, dispositivos y auditoría.');
   }
-  if (env.NODE_ENV === 'development') return new DevelopmentSecurityStore(resolve(join(__dirname, '../../security-devices.json')));
+  if (env.NODE_ENV === 'development') return new DevelopmentSecurityStore(resolve(env.SECURITY_DEVICES_FILE_PATH || join(__dirname, '../../security-devices.json')));
   return new MemorySecurityStore();
 }

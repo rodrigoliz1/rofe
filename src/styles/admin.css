@@ -855,3 +855,19 @@
   border: 0;
 }
 
+
+.modifier-editor { margin: 24px 0; padding-top: 24px; border-top: 1px solid var(--border-color); }
+.modifier-editor h3 { margin-bottom: 12px; }
+.modifier-editor p { color: var(--text-secondary); line-height: 1.6; max-width: 70ch; }
+.modifier-editor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 16px 0; }
+.modifier-editor label { display: grid; gap: 7px; font-size: 14px; }
+.modifier-editor input:not([type=checkbox]), .modifier-editor select { min-height: 44px; min-width: 0; width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary); color: var(--text-primary); font: inherit; }
+.modifier-editor button { min-height: 44px; padding: 10px 14px; border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); background: var(--bg-elevated); font: inherit; cursor: pointer; }
+.modifier-editor-actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0; align-items: center; }
+.modifier-editor-actions label { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.modifier-fieldset { min-width: 0; padding: 20px 0; margin: 24px 0; border: 0; border-top: 1px solid var(--border-color); }
+.modifier-fieldset legend { padding-right: 12px; font-size: 18px; font-weight: 600; }
+.modifier-option-editor { padding: 16px 0; border-bottom: 1px solid var(--border-color); }
+.modifier-recipe-changes { display: grid; gap: 12px; margin: 16px 0; }
+.modifier-recipe-changes > label { grid-template-columns: 1fr 100px auto; align-items: center; }
+@media (max-width: 600px) { .modifier-editor-grid { grid-template-columns: 1fr; } .modifier-recipe-changes > label { grid-template-columns: 1fr; } }

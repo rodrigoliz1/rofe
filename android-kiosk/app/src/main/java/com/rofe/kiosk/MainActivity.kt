@@ -1,5 +1,10 @@
 package com.rofe.kiosk
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import com.rofe.kiosk.core.CameraPolicy
 import android.annotation.SuppressLint
 import android.content.res.Configuration
 import android.graphics.Bitmap
@@ -67,6 +72,21 @@ import kotlin.math.min
  * boot start, a native admin exit and a safe, origin-locked WebView.
  */
 class MainActivity : AppCompatActivity(), AdminMenu.Host {
+
+    private var cameraRequest: PermissionRequest? = null
+    private var cameraPermissionPrompt = false
+    private val requestCamera = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        cameraPermissionPrompt = false
+        val pending = cameraRequest
+        cameraRequest = null
+        if (pending != null) {
+            if (granted && canUseCamera(pending)) pending.grant(arrayOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE)) else pending.deny()
+        }
+    }
+    private fun canUseCamera(request: PermissionRequest): Boolean = CameraPolicy.permits(
+        BuildConfig.CAMERA_ENABLED, config?.origin, request.origin.toString(), webView?.url, request.resources,
+    ) && !isFinishing && !isDestroyed
+    private fun cancelCamera() { cameraRequest?.deny(); cameraRequest = null }
 
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var prefs: KioskPrefs
@@ -140,6 +160,7 @@ class MainActivity : AppCompatActivity(), AdminMenu.Host {
     override fun onResume() {
         super.onResume()
         webView?.onResume()
+        if (BuildConfig.BARISTA_MODE) webView?.evaluateJavascript("window.dispatchEvent(new Event('rofe:resume'))", null)
         applyImmersive()
         if (pendingRelock || shouldLock()) {
             pendingRelock = false
@@ -148,6 +169,10 @@ class MainActivity : AppCompatActivity(), AdminMenu.Host {
     }
 
     override fun onPause() {
+        if (BuildConfig.BARISTA_MODE && !cameraPermissionPrompt) {
+            cancelCamera()
+            webView?.evaluateJavascript("window.dispatchEvent(new Event('rofe:native-pause'))", null)
+        }
         webView?.onPause()
         super.onPause()
     }
@@ -165,6 +190,7 @@ class MainActivity : AppCompatActivity(), AdminMenu.Host {
     }
 
     override fun onDestroy() {
+        cancelCamera()
         handler.removeCallbacksAndMessages(null)
         networkCallback?.let { runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it) } }
         destroyWebView()
@@ -263,6 +289,7 @@ class MainActivity : AppCompatActivity(), AdminMenu.Host {
         val url = prefs.debugUrlOverride ?: BuildConfig.KIOSK_URL
         try {
             val parsed = KioskConfig.parse(url, BuildConfig.EXTRA_ALLOWED_HOSTS, BuildConfig.ALLOW_CLEARTEXT)
+            require(!BuildConfig.BARISTA_MODE || Uri.parse(parsed.startUrl).path?.trimEnd('/') == "/barista") { "ROFÉ Barista requiere la ruta /barista." }
             config = parsed
             policy = NavigationPolicy(parsed)
             configError = null
@@ -311,7 +338,7 @@ class MainActivity : AppCompatActivity(), AdminMenu.Host {
             mediaPlaybackRequiresUserGesture = false // payment confirmation sound
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             cacheMode = WebSettings.LOAD_DEFAULT // HTTP caching rules from the server; HTML is revalidated
-            userAgentString = "$userAgentString ROFEKiosk/${BuildConfig.VERSION_NAME}"
+            userAgentString = "$userAgentString ${if (BuildConfig.BARISTA_MODE) "ROFEBarista" else "ROFEKiosk"}/${BuildConfig.VERSION_NAME}"
         }
         safeWebViewFeature("SAFE_BROWSING_ENABLE") {
             if (WebViewFeature.isFeatureSupported(WebViewFeature.SAFE_BROWSING_ENABLE)) {
@@ -549,20 +576,21 @@ class MainActivity : AppCompatActivity(), AdminMenu.Host {
     private inner class KioskWebViewClient : WebViewClient() {
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             val url = request.url.toString()
-            if (policy?.allowNavigation(url) == true) return false
+            if (policy?.allowNavigation(url) == true && (!BuildConfig.BARISTA_MODE || url == "about:blank" || Uri.parse(url).path?.trimEnd('/') == "/barista")) return false
             KioskLog.w("Navegación bloqueada: ${KioskLog.safeUrl(url)}")
             return true
         }
 
         override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
             val url = request.url.toString()
-            val allowed = if (request.isForMainFrame) policy?.allowNavigation(url) == true else policy?.allowResource(url) == true
+            val allowed = if (request.isForMainFrame) policy?.allowNavigation(url) == true && (!BuildConfig.BARISTA_MODE || url == "about:blank" || Uri.parse(url).path?.trimEnd('/') == "/barista") else policy?.allowResource(url) == true
             if (allowed) return null
             KioskLog.w("Recurso bloqueado: ${KioskLog.safeUrl(url)}")
             return WebResourceResponse("text/plain", "utf-8", 403, "Blocked", emptyMap(), ByteArrayInputStream(ByteArray(0)))
         }
 
         override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+            cancelCamera()
             mainFrameFailed = false
         }
 
@@ -603,7 +631,21 @@ class MainActivity : AppCompatActivity(), AdminMenu.Host {
     }
 
     private inner class KioskChromeClient : WebChromeClient() {
-        override fun onPermissionRequest(request: PermissionRequest) = request.deny()
+        override fun onPermissionRequest(request: PermissionRequest) {
+            runOnUiThread {
+                if (!canUseCamera(request) || cameraRequest != null) { request.deny(); return@runOnUiThread }
+                if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                    request.grant(arrayOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE))
+                } else {
+                    cameraRequest = request
+                    cameraPermissionPrompt = true
+                    requestCamera.launch(Manifest.permission.CAMERA)
+                }
+            }
+        }
+        override fun onPermissionRequestCanceled(request: PermissionRequest) {
+            runOnUiThread { if (cameraRequest === request) cameraRequest = null }
+        }
 
         override fun onGeolocationPermissionsShowPrompt(origin: String?, callback: GeolocationPermissions.Callback) =
             callback.invoke(origin, false, false)

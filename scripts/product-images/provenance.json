@@ -1,0 +1,103 @@
+{
+  "date": "2026-11-05",
+  "collection": "ROFE warm neutral studio",
+  "direction": "Hyperrealistic advertising product photograph for a premium espresso bar menu. Square 1:1 frame, product centered and filling about 60% of the frame, camera at a three-quarter angle slightly above the subject, same scale and perspective for every product. Soft diffused studio key light from the left, gentle fill, subtle soft shadow. Seamless warm neutral background in beige and cream with a soft gradient, matte light stone surface. Minimalist composition, realistic textures, appetizing. No text, no logos, no brands, no people, no faces, no hands, no props or decorations beyond what is described.",
+  "products": [
+    {
+      "productId": "americano",
+      "file": "americano.png",
+      "sha256": "a06a0d0cf24a8d8fa36ac5f00489e90aa60869ba71ffc314b640ff4632578df7",
+      "tool": "image_gen.imagegen",
+      "generated": true,
+      "subject": "An americano in a clear double-walled glass mug, deep brown coffee with a thin light crema on top, visible transparency of the glass, nothing else on the surface."
+    },
+    {
+      "productId": "cold-brew",
+      "file": "cold-brew.png",
+      "sha256": "b4af52ea84544f94ad66cf306a5b9732ce9c01ac474f1803a5fda677812da237",
+      "tool": "image_gen.imagegen",
+      "generated": true,
+      "subject": "A cold brew coffee in a tall clear tumbler with large clear ice cubes, deep amber-mahogany color with light passing through, tiny condensation droplets on the glass, nothing else on the surface."
+    },
+    {
+      "productId": "croissant-mantequilla",
+      "file": "croissant-mantequilla.png",
+      "sha256": "29e49d6b30016a5ce728d34a4bd1635e5253da788a0d6fbf0783e53bb6c4827d",
+      "tool": "image_gen.imagegen",
+      "generated": true,
+      "subject": "A single golden butter croissant with crisp flaky laminated layers and a glossy egg-washed crust, resting on a small cream ceramic plate, a few flakes of pastry on the surface."
+    },
+    {
+      "productId": "double-espresso",
+      "file": "double-espresso.png",
+      "sha256": "a0ccabd209053561cae009bd214fca47a40e2efa07d25ce8a97a2e3744d364ab",
+      "tool": "image_gen.imagegen",
+      "generated": true,
+      "subject": "A double espresso in a slightly larger white ceramic cup on a saucer, deep dark-brown coffee with a thick hazelnut crema, a visibly fuller cup than a single espresso, nothing else on the surface."
+    },
+    {
+      "productId": "espresso",
+      "file": "espresso.png",
+      "sha256": "0c8c85e498b3f378986cc20cffb393357b3cbc5169feabca6d18fcf5ed0642b6",
+      "tool": "image_gen.imagegen",
+      "generated": true,
+      "subject": "A single espresso in a small white ceramic demitasse on a matching saucer, thick golden-hazelnut crema with fine tiger striping, nothing else on the surface."
+    },
+    {
+      "productId": "flat-white",
+      "file": "flat-white.png",
+      "sha256": "cdcfe83694e54ab9d84380dc8a7701fb4410d333b95c32e4eabbd4a838f9dfee",
+      "tool": "image_gen.imagegen",
+      "generated": true,
+      "subject": "A flat white in a small 160 ml cream ceramic cup on a saucer, thin glossy microfoam with a small tulip latte art, rich coffee-brown edges, nothing else on the surface."
+    },
+    {
+      "productId": "galleta-chocolate",
+      "file": "galleta-chocolate.png",
+      "sha256": "d9aaf6d48b694bd349063095ce55edea5723c038075b9675c57a05f99315445a",
+      "tool": "image_gen.imagegen",
+      "generated": true,
+      "subject": "Exactly one single soft-baked chocolate chip cookie on an ivory ceramic plate, golden edges and dark chocolate chunks. No stack, no additional food."
+    },
+    {
+      "productId": "iced-latte",
+      "file": "iced-latte.png",
+      "sha256": "7a23e2681143122ae93a8d241f87948cf0dbfec7ccc3a1c5d01211e1f9765f76",
+      "tool": "image_gen.imagegen",
+      "generated": true,
+      "subject": "An iced latte in a tall clear glass with ice cubes, milk and espresso gently layered from cream to caramel brown, a clear glass straw, light condensation, nothing else on the surface."
+    },
+    {
+      "productId": "iced-matcha-latte",
+      "file": "iced-matcha-latte.png",
+      "sha256": "d6158a5c663397e22f857700688b1c5940eb6ee08ac8a75616fc53c74c3eb5d3",
+      "tool": "image_gen.imagegen",
+      "generated": true,
+      "subject": "An iced matcha latte in a tall clear glass with clear ice cubes, vivid jade-green matcha floating over white milk with a soft gradient, light condensation, nothing else on the surface."
+    },
+    {
+      "productId": "latte",
+      "file": "latte.png",
+      "sha256": "e0b930ff633a4f24e42cf6e3cbe0351eedc48ce010cd9f494bbb49f908696839",
+      "tool": "image_gen.imagegen",
+      "generated": true,
+      "subject": "A hot café latte in a wide cream-colored ceramic cup on a saucer, glossy microfoam with a symmetrical rosetta latte art, warm caramel-brown edges, light steam, nothing else on the surface."
+    },
+    {
+      "productId": "matcha-latte",
+      "file": "matcha-latte.png",
+      "sha256": "e6845c7da64c9fa5720614862ba60d61d4baa92b099c5566b180a597bb3e657d",
+      "tool": "image_gen.imagegen",
+      "generated": true,
+      "subject": "A hot matcha latte in a white ceramic cup, vivid jade-green surface with white leaf latte art, velvety microfoam, nothing else on the surface."
+    },
+    {
+      "productId": "pain-au-chocolat",
+      "file": "pain-au-chocolat.png",
+      "sha256": "68d0b1322d3629f7020c57e60e2d36b8a5cd2703bf3b4be8aa3e3e2328f05073",
+      "tool": "image_gen.imagegen",
+      "generated": true,
+      "subject": "A single golden pain au chocolat with crisp laminated layers, two dark chocolate batons visible at the ends, on a small cream ceramic plate, nothing else on the surface."
+    }
+  ]
+}

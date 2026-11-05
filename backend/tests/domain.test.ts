@@ -17,15 +17,19 @@ const latte: DbProduct = {
   customizable: true,
   image: '/latte.webp',
   recipe: { coffee_beans: 18, milk_whole: 250, cup_hot_8oz: 1 },
-  custom_variants: [{ title: 'Jarabe', options: [{ name: 'Vainilla', priceModifier: 8 }] }],
+  custom_variants: [
+    { title: 'Jarabe', purpose: 'general', options: [{ name: 'Vainilla', priceModifier: 8 }] },
+    { title: 'Tamaño', purpose: 'size', options: [{ name: 'Grande', priceModifier: 12, recipeDeltas: { coffee_beans: 9, milk_whole: 125 } }] },
+    { title: 'Leche', purpose: 'milk', ingredientId: 'milk_whole', options: [{ name: 'Avena', priceModifier: 15, ingredientId: 'milk_avena' }, { name: 'Almendra', priceModifier: 15, ingredientId: 'milk_almendra' }] },
+    { title: 'Shots', purpose: 'coffee', kind: 'quantity', ingredientId: 'coffee_beans', amountPerUnit: 18, min: 0, max: 2, pricePerUnit: 15, options: [] },
+  ],
 };
 
 describe('server-controlled pricing', () => {
   it('prices size, milk, shot and catalog variants without a client total', () => {
     const result = priceOrder([latte], [{
       productId: 'latte', quantity: 2,
-      customization: { size: 'grande', milk: 'avena', sweetness: 'none', temp: 'hot', extraShot: true },
-      selectedCustomVariants: { Jarabe: 'Vainilla' },
+      selectedCustomVariants: { Jarabe: 'Vainilla', 'Tamaño': 'Grande', Leche: 'Avena' }, quantitySelections: { Shots: 1 },
     }]);
     expect(result.items[0].unitPrice).toBe(105);
     expect(result.total).toBe(210);
@@ -45,7 +49,7 @@ describe('server-controlled pricing', () => {
 
 describe('inventory and costing', () => {
   it('applies recipe substitutions and extra shots', () => {
-    const priced = priceOrder([latte], [{ productId: 'latte', quantity: 2, customization: { size: 'grande', milk: 'almendra', sweetness: 'none', temp: 'hot', extraShot: true } }]);
+    const priced = priceOrder([latte], [{ productId: 'latte', quantity: 2, selectedCustomVariants: { 'Tamaño': 'Grande', Leche: 'Almendra' }, quantitySelections: { Shots: 1 } }]);
     expect(calculateRecipeConsumption(priced.items)).toEqual(expect.arrayContaining([
       { ingredientId: 'coffee_beans', quantity: 90 },
       { ingredientId: 'milk_almendra', quantity: 750 },

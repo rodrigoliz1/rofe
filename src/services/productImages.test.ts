@@ -18,7 +18,7 @@ const productionRows = [
 describe('catalog photos', () => {
   it('covers the 12 products of the production catalog with an explicit status', () => {
     expect(Object.keys(manifest.products).sort()).toEqual(['americano', 'cold-brew', 'croissant-mantequilla', 'double-espresso', 'espresso', 'flat-white', 'galleta-chocolate', 'iced-latte', 'iced-matcha-latte', 'latte', 'matcha-latte', 'pain-au-chocolat']);
-    for (const id of Object.keys(manifest.products)) expect(['approved', 'interim', 'pending']).toContain(photoStatus(id));
+    for (const id of Object.keys(manifest.products)) expect(photoStatus(id)).toBe('approved');
   });
 
   it('never lets an old database reference (404 /espresso.png, external Unsplash) override the manifest', () => {
@@ -38,8 +38,8 @@ describe('catalog photos', () => {
   it('an admin upload wins over interim and pending photos, and over approved ones only if newer', async () => {
     vi.stubGlobal('window', { location: { origin: 'https://rofe.vercel.app' }, devicePixelRatio: 1 });
     const upload = (ts: number) => `https://abc.supabase.co/storage/v1/object/public/product_images/${ts}_latte.webp`;
-    expect(productPhoto({ id: 'latte', image: upload(1_700_000_000_000) })).toMatchObject({ source: 'uploaded' });
-    expect(productPhoto({ id: 'espresso', image: upload(1_700_000_000_000) })).toMatchObject({ source: 'uploaded' });
+    expect(productPhoto({ id: 'latte', image: upload(1_700_000_000_000) })).toMatchObject({ source: 'approved' });
+    expect(productPhoto({ id: 'espresso', image: upload(Date.parse('2027-02-01')) })).toMatchObject({ source: 'uploaded' });
     expect(productPhoto({ id: 'nuevo', image: '/api/product-images/x.webp' }).source).toBe('uploaded');
     expect(productPhoto({ id: 'nuevo', image: '' })).toEqual({ card: null, detail: null, source: 'none' });
     expect(productPhoto({ id: 'nuevo', image: 'https://images.unsplash.com/x' }).source).toBe('none');

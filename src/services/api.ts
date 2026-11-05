@@ -57,8 +57,9 @@ export async function loginDevice(deviceId: string, deviceToken: string): Promis
   return applySession(await requestSession('/api/auth/device/login', { deviceId, deviceToken }));
 }
 export async function logout(): Promise<void> {
-  try { await apiFetch('/api/auth/logout', { method: 'POST' }, false); }
-  finally { accessToken = undefined; principal = undefined; }
+  const response = await apiFetch('/api/auth/logout', { method: 'POST' }, false);
+  if (!response.ok && response.status !== 401) throw new ApiError(await publicError(response), response.status);
+  accessToken = undefined; principal = undefined;
 }
 export async function publicError(response: Response): Promise<string> {
   const contentType = response.headers.get('content-type') || '';

@@ -38,9 +38,12 @@ android {
 
     defaultConfig {
         applicationId = "com.rofe.kiosk"
+        buildConfigField("boolean", "BARISTA_MODE", "false")
+        buildConfigField("boolean", "CAMERA_ENABLED", "false")
+        buildConfigField("boolean", "AUTO_START_DEFAULT", "true")
         minSdk = 26
         targetSdk = 35
-        versionCode = setting("rofe.versionCode", "1").toInt()
+        versionCode = setting("rofe.versionCode", "13").toInt()
         versionName = setting("rofe.versionName", "1.0.0")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

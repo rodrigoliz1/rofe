@@ -18,18 +18,21 @@ export const orderItemInputSchema = z.object({
     temp: 'hot',
     extraShot: false,
   }),
-  selectedCustomVariants: z.record(z.string(), z.string()).optional(),
+  selectedCustomVariants: z.record(z.string().max(80), z.string().max(80)).optional(),
+  quantitySelections: z.record(z.string().max(80), z.number().int().min(0).max(50)).optional(),
   notes: z.string().trim().max(240).optional(),
 });
 
 export const createOrderSchema = z.object({
   operationId: z.string().uuid(),
+  source: z.enum(['POS', 'KIOSK']).optional(),
   customerName: z.string().trim().min(1).max(80).optional(),
   items: z.array(orderItemInputSchema).min(1).max(50),
   paymentMethod: z.enum(['card', 'cash']),
   discountAuthorizationToken: z.string().max(2048).optional(),
   /** Change voucher (cupón de cambio) to use as a discount. */
   voucherCode: z.string().trim().min(10).max(40).optional(),
+  expectedSubtotal: z.number().min(0).optional(),
   notes: z.string().trim().max(500).optional(),
 });
 

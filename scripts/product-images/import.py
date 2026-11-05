@@ -33,9 +33,10 @@ def main() -> int:
     folder = pathlib.Path(sys.argv[1])
     data = json.loads(SOURCES.read_text("utf-8"))
     products = data["products"]
-    ORIGINALS.mkdir(exist_ok=True)
     now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat()
     imported, problems = [], []
+    validated = []
+    seen = set()
     for file in sorted(folder.iterdir()):
         if file.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
             continue
@@ -43,14 +44,31 @@ def main() -> int:
         if product_id not in products:
             problems.append(f"{file.name}: no existe el producto «{product_id}»")
             continue
-        with Image.open(file) as image:
-            width, height = image.size
+        if product_id in seen:
+            problems.append(f"{file.name}: producto duplicado en el lote")
+            continue
+        seen.add(product_id)
+        try:
+            with Image.open(file) as image:
+                width, height = image.size
+                image.verify()
+        except (OSError, ValueError):
+            problems.append(f"{file.name}: imagen inválida")
+            continue
         if min(width, height) < 1024:
             problems.append(f"{file.name}: {width}×{height}, se requieren al menos 1024 px")
             continue
         if abs(width / height - 1) > 0.05:
             problems.append(f"{file.name}: {width}×{height}, se requiere formato cuadrado 1:1")
             continue
+        validated.append((file, product_id))
+    if problems:
+        for problem in problems:
+            print("✗", problem)
+        print("El lote no se importó; no se modificaron originales ni manifiesto.")
+        return 1
+    ORIGINALS.mkdir(exist_ok=True)
+    for file, product_id in validated:
         target = ORIGINALS / f"{product_id}{file.suffix.lower()}"
         shutil.copyfile(file, target)
         spec = products[product_id]
@@ -58,8 +76,6 @@ def main() -> int:
         spec.pop("focus", None)
         imported.append(product_id)
     SOURCES.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", "utf-8")
-    for problem in problems:
-        print("✗", problem)
     if imported:
         subprocess.run([sys.executable, str(HERE / "build.py")], check=True)
     pending = [pid for pid, spec in products.items() if spec["status"] != "approved"]

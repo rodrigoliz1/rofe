@@ -1,0 +1,44 @@
+import request from 'supertest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { afterAll, beforeAll, expect, test } from 'vitest';
+import type { Express } from 'express';
+let app: Express;
+let directory: string;
+let authorization: string;
+beforeAll(async () => {
+  directory = await mkdtemp(join(tmpdir(), 'rofe-cash-api-'));
+  Object.assign(process.env, { DB_FILE_PATH: join(directory, 'db.json'), AUTH_BOOTSTRAP_ADMIN_EMAIL: 'admin@rofe.test', AUTH_BOOTSTRAP_ADMIN_HASH: '$2b$04$JQi.d6Imx6difkoQ44MRpurCCn9m7VqL0U7Amhct090Q9yyJLH9ey' });
+  const module = await import('../src/index'); app = module.app; await module.ensureReady();
+  const login = await request(app).post('/api/auth/login').send({ email: 'admin@rofe.test', password: 'TestAdmin123!' });
+  expect(login.status).toBe(200); authorization = `Bearer ${login.body.accessToken}`;
+});
+afterAll(async () => { if (directory) await rm(directory, { recursive: true, force: true }); });
+test('open, retry concurrently, operate and close exactly one cash session', async () => {
+  const operationId = randomUUID();
+  const payload = { operationId, denominations: { bill_100: 2 } };
+  const responses = await Promise.all([1, 2].map(() => request(app).post('/api/admin/cash/session/open').set('Authorization', authorization).send(payload)));
+  expect(responses.map(r => r.status).sort()).toEqual([200, 201]);
+  expect(responses[0].body.id).toBe(operationId); expect(responses[1].body.id).toBe(operationId);
+  const changed = await request(app).post('/api/admin/cash/session/open').set('Authorization', authorization).send({ ...payload, denominations: { bill_100: 3 } });
+  expect(changed.status).toBe(409); expect(changed.body.error.code).toBe('CASH_OPEN_OPERATION_CONFLICT');
+  const movement = { operationId: randomUUID(), type: 'manual_income', amount: 50, denominations: { bill_50: 1 }, description: 'Ingreso de prueba' };
+  for (let retry = 0; retry < 2; retry++) expect((await request(app).post('/api/admin/cash/transaction').set('Authorization', authorization).send(movement)).status).toBe(200);
+  const state = await request(app).get('/api/admin/cash/session').set('Authorization', authorization);
+  expect(state.body.history).toHaveLength(1); expect(state.body.current.expectedCash).toBe(250);
+  const close = await request(app).post('/api/admin/cash/session/close').set('Authorization', authorization).send({ denominations: { bill_100: 2, bill_50: 1 } });
+  expect(close.status).toBe(200); expect(close.body.difference).toBe(0);
+  expect((await request(app).post('/api/admin/cash/session/open').set('Authorization', authorization).send(payload)).body.error.code).toBe('CASH_OPEN_OPERATION_COMPLETED');
+  const next = await request(app).post('/api/admin/cash/session/open').set('Authorization', authorization).send({ ...payload, operationId: randomUUID() });
+  expect(next.status).toBe(201);
+});
+test('invalid denominations and unauthorized openings never mutate cash', async () => {
+  expect((await request(app).post('/api/admin/cash/session/open').send({ denominations: {} })).status).toBe(401);
+  const before = (await request(app).get('/api/admin/cash/session').set('Authorization', authorization)).body;
+  const bad = await request(app).post('/api/admin/cash/session/open').set('Authorization', authorization).send({ denominations: { counterfeit: 1 } });
+  expect(bad.status).toBe(400); expect(bad.body.error.code).toBe('INVALID_DENOMINATIONS');
+  const after = (await request(app).get('/api/admin/cash/session').set('Authorization', authorization)).body;
+  expect(after).toEqual(before);
+});

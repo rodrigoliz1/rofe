@@ -24,6 +24,7 @@ export const Cart: React.FC<CartProps> = ({
   const subtotal = cart.reduce((acc, item) => acc + item.totalPrice, 0);
 
   const getCustomizationSummary = (item: CartItem) => {
+    if (item.preparation) return item.preparation.join(" · ") || "Receta de la casa";
     const parts: string[] = [];
     if (item.product.category === 'bakery') {
       if (item.customization.temp === 'hot') parts.push('Caliente');

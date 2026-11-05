@@ -128,7 +128,7 @@ test('adding updates the counter without opening the order and keeps the catalog
   await expect(drawer(page)).toHaveCount(0);
   expect(await grid.evaluate((element) => element.scrollTop)).toBe(scrolled);
   await page.getByRole('button', { name: /^Espresso/ }).click();
-  await page.getByRole('button', { name: /^\+$/ }).last().click(); // quantity 2 in the sheet
+  await page.getByRole('button', { name: 'Añadir un producto', exact: true }).click(); // quantity 2 in the sheet
   await page.getByRole('button', { name: /Agregar a la Orden/ }).click();
   await expect(page.locator('.kiosk-order-count')).toHaveText('3');
   await expect(orderButton(page)).toHaveAccessibleName(/3 artículos/);
@@ -389,7 +389,7 @@ test('the production catalog rows (/espresso.png, Unsplash URLs, 12 products) ne
   expect(requested.filter((url) => /espresso\.png|unsplash|matcha-frio\.jpg|pan-chocolate\.jpg/.test(url))).toEqual([]);
   expect(requested.every((url) => new URL(url).origin === 'http://127.0.0.1:4173')).toBe(true);
   const pending = await page.locator('.kiosk-catalog [data-photo="pending"]').count();
-  expect(pending).toBe(4); // double espresso, latte, flat white, croissant: brand illustration until approved
+  expect(pending).toBe(0); // The new collection now covers all twelve products.
 });
 
 test('a photo that fails to load falls back to the brand illustration', async ({ page }) => {
@@ -412,7 +412,7 @@ test('photos are downloaded and decoded on the welcome screen, ready when the me
   await expect(page.getByRole('button', { name: /ORDENAR AQUÍ/ })).toBeVisible();
   await page.waitForFunction(() => Boolean(window.__rofeKioskPreload));
   const preload = await page.evaluate(() => window.__rofeKioskPreload!);
-  expect(preload.total).toBe(6);
+  expect(preload.total).toBe(8);
   const clickedAt = await page.evaluate(() => performance.now());
   await start(page);
   // First screen: every visible card image is painted (loaded class) almost immediately.

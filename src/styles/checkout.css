@@ -773,3 +773,8 @@
 .voucher-applied span { flex: 1; text-align: left; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .voucher-applied strong { color: var(--accent-warm); font-size: 18px; }
 .voucher-applied .checkout-secondary-action { margin: 0; }
+
+.modifier-count { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
+.modifier-count > span, .customization-base-note { color: var(--text-secondary); font-size: 14px; line-height: 1.6; }
+.modifier-count output { min-width: 36px; text-align: center; font-weight: 600; font-variant-numeric: tabular-nums; }
+.option-btn:disabled { opacity: 0.5; cursor: not-allowed; }

@@ -10,5 +10,10 @@ export default defineConfig({
   plugins: [react()],
   define: { __ROFE_WEB_VERSION__: JSON.stringify(commit ? `${version}+${commit}` : version) },
   build: { outDir: process.env.ROFE_BUILD_OUT_DIR || 'dist' },
-  server: { proxy: { '/api': 'http://127.0.0.1:3000', '/health': 'http://127.0.0.1:3000' } },
+  server: {
+    proxy: { '/api': 'http://127.0.0.1:3000', '/health': 'http://127.0.0.1:3000', '/ready': 'http://127.0.0.1:3000' },
+    // Vite's project root includes the backend and private local data. Never serve them.
+    fs: { deny: ['.env', '.env.*', '*.{crt,pem}', '**/.git/**', '**/backend/**', '**/.rofe-local/**'] },
+    watch: { ignored: ['**/.rofe-local/**', '**/.rofe-e2e-dist/**'] },
+  },
 })

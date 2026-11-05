@@ -3,11 +3,24 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, expect, test } from 'vitest';
 import { AuthService } from '../src/auth/service';
-import { DevelopmentSecurityStore } from '../src/auth/store';
+import { createSecurityStore, DevelopmentSecurityStore } from '../src/auth/store';
 import type { AppEnv } from '../src/config/env';
 
 let directory = '';
 afterEach(async () => { if (directory) await rm(directory, { recursive: true, force: true }); });
+
+test('development profiles persist devices only in their configured directory', async () => {
+  directory = await mkdtemp(join(tmpdir(), 'rofe-profile-'));
+  const path = join(directory, 'devices.json');
+  const env = { NODE_ENV: 'development', SECURITY_DEVICES_FILE_PATH: path } as AppEnv;
+  const store = createSecurityStore(env);
+  await store.initialize([]);
+  await store.saveDevice({ id: 'isolated-device', name: 'Local only', tokenHash: 'hash-only', active: true, createdAt: new Date().toISOString() });
+  const restored = createSecurityStore(env);
+  await restored.initialize([]);
+  expect((await restored.findDevice('isolated-device'))?.name).toBe('Local only');
+  expect(JSON.parse(await readFile(path, 'utf8'))).toHaveLength(1);
+});
 
 test('development device authorization survives a restart and revocation remains effective', async () => {
   directory = await mkdtemp(join(tmpdir(), 'rofe-device-'));

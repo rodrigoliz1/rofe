@@ -1,6 +1,5 @@
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -30,8 +29,6 @@ import { z } from 'zod';
 import { buildOperationalReport, salesCsv } from './accounting/reports';
 import { generateVoucherCode, normalizeVoucherCode, voucherQrPayload } from './domain/vouchers';
 import { amountDue, type DbChangeVoucher } from './db';
-
-dotenv.config();
 
 const app = express();
 const env = getEnv();
@@ -314,6 +311,8 @@ const reconcilePendingPickupThrottled = () => Date.now() - lastSweepAt >= 60_000
 // --- API Routes ---
 
 // Get active orders (Barista View)
+app.get('/api/barista/session', requireAuth, requireRole('ADMIN', 'MANAGER', 'BARISTA'), (req, res) => { res.json({ role: req.principal!.role, station: 'barista' }); });
+
 app.get('/api/orders', requireAuth, requireRole('ADMIN', 'MANAGER', 'BARISTA'), async (_req, res) => {
   try {
     const orders = await db.getOrders();
@@ -341,7 +340,8 @@ app.post('/api/orders', requireAuth, requireRole('POS_DEVICE'), async (req, res,
     if (input.paymentMethod === 'card' && !mercadoPago.isConfigured() && !simulation) {
       throw new AppError(503, 'PAYMENT_PROVIDER_NOT_CONFIGURED', 'La terminal no está disponible. Selecciona efectivo o solicita ayuda.');
     }
-    const basePricing = priceOrder(await db.getProducts(), input.items);
+    const basePricing = priceOrder(await db.getProducts(), input.items, await db.getRawInventory());
+    if (input.expectedSubtotal !== undefined && Math.abs(basePricing.subtotal - input.expectedSubtotal) > 0.001) throw new AppError(409, 'PRICE_CHANGED', 'Los precios cambiaron. Actualiza el menú y revisa el pedido antes de confirmar.');
     const authorizedDiscount = input.discountAuthorizationToken
       ? discountAuthorization.verify(input.discountAuthorizationToken, input.operationId)
       : undefined;
@@ -370,6 +370,7 @@ app.post('/api/orders', requireAuth, requireRole('POS_DEVICE'), async (req, res,
       folio,
       operationId: input.operationId,
       deviceId: req.principal!.deviceId,
+      entrypoint: input.source ?? 'POS',
       customerName: input.customerName || 'Cliente',
       items: pricing.items,
       subtotal: pricing.subtotal,
@@ -525,13 +526,14 @@ app.post('/api/orders/sync', requireAuth, requireRole('POS_DEVICE'), async (req,
       if (operation.payload.voucherCode) {
         throw new AppError(400, 'OFFLINE_VOUCHER_NOT_ALLOWED', 'Los cupones de cambio solo se aceptan en línea.');
       }
-      const pricing = priceOrder(products, operation.payload.items);
+      const pricing = priceOrder(products, operation.payload.items, await db.getRawInventory());
       const now = new Date().toISOString();
       const inserted = await db.createOrder({
         id: operation.operationId,
         folio: `R-${operation.operationId.replaceAll('-', '').slice(0, 10).toUpperCase()}`,
         operationId: operation.operationId,
         deviceId: req.principal!.deviceId,
+        entrypoint: operation.payload.source ?? 'POS',
         customerName: operation.payload.customerName || 'Cliente',
         items: pricing.items,
         subtotal: pricing.subtotal,
@@ -1123,11 +1125,23 @@ app.get('/api/admin/cash/session', async (_req, res, next) => {
 
 app.post('/api/admin/cash/session/open', async (req, res, next) => {
   try {
-    const { denominations } = z.object({ denominations: z.record(z.string(), z.number().int().min(0)) }).parse(req.body);
+    const { denominations, operationId } = z.object({ denominations: z.record(z.string(), z.number().int().min(0)), operationId: z.string().uuid().optional() }).parse(req.body);
     const openingAmount = totalDenominations(denominations);
-    const session = { id: randomUUID(), openingAmount, openingDenominations: denominations, openedBy: req.principal!.subjectId, openedAt: new Date().toISOString() };
+    const session = { id: operationId ?? randomUUID(), openingAmount, openingDenominations: denominations, openedBy: req.principal!.subjectId, openedAt: new Date().toISOString() };
     const opened = await db.openCashSession(session);
-    if (!opened) throw new AppError(409, 'CASH_SESSION_ALREADY_OPEN', 'Ya existe una sesión de caja abierta.');
+    if (!opened) {
+      const previous = (await db.getCashSessions()).find((entry) => entry.id === session.id);
+      if (previous) {
+        const keys = new Set([...Object.keys(previous.openingDenominations), ...Object.keys(denominations)]);
+        if (previous.openedBy !== session.openedBy || [...keys].some((key) => (previous.openingDenominations[key] ?? 0) !== (denominations[key] ?? 0))) {
+          throw new AppError(409, 'CASH_OPEN_OPERATION_CONFLICT', 'Este intento de apertura ya se registró con otro conteo. Actualiza la caja antes de continuar.');
+        }
+        if (previous.closedAt) throw new AppError(409, 'CASH_OPEN_OPERATION_COMPLETED', 'La caja de este intento ya fue cerrada. Actualiza la pantalla para iniciar una apertura nueva.');
+        res.status(200).json({ ...previous, idempotentReplay: true });
+        return;
+      }
+      throw new AppError(409, 'CASH_SESSION_ALREADY_OPEN', 'Ya hay una caja abierta. Actualiza su estado y realiza el corte antes de abrir otra sesión.');
+    }
     await auditSensitive(req, { action: 'CASH_OPEN', entity: 'CASH_SESSION', entityId: session.id, after: session });
     broadcast({ type: 'cash_updated' });
     res.status(201).json(session);
@@ -1528,7 +1542,7 @@ export { app };
 
 async function start(): Promise<void> {
   await ensureReady();
-  const server = app.listen(PORT, () => {
+  const server = app.listen(PORT, env.HOST ?? '0.0.0.0', () => {
     console.log(JSON.stringify({ level: 'info', event: 'server_started', port: PORT, environment: env.NODE_ENV }));
   });
 

@@ -33,7 +33,7 @@ class KioskPrefs(context: Context) : AdminLockout.Store {
         set(value) = prefs.edit { putBoolean("kiosk_mode", value) }
 
     var autostart: Boolean
-        get() = prefs.getBoolean("autostart", true)
+        get() = prefs.getBoolean("autostart", BuildConfig.AUTO_START_DEFAULT)
         set(value) = prefs.edit { putBoolean("autostart", value) }
 
     var haptics: Boolean

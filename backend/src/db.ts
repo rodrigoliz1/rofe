@@ -18,11 +18,26 @@ export interface DbRawInventory {
 export interface CustomVariantOption {
   name: string;
   priceModifier: number;
+  ingredientId?: string;
+  ingredientQuantity?: number;
+  recipeDeltas?: Record<string, number>;
+  instruction?: string;
+  available?: boolean;
 }
 
 export interface CustomVariantGroup {
   title: string;
   options: CustomVariantOption[];
+  kind?: 'choice' | 'quantity';
+  purpose?: 'general' | 'size' | 'milk' | 'ice' | 'temperature' | 'coffee' | 'sugar' | 'splenda';
+  enabled?: boolean;
+  required?: boolean;
+  ingredientId?: string;
+  amountPerUnit?: number;
+  min?: number;
+  max?: number;
+  pricePerUnit?: number;
+  availableMax?: number;
 }
 
 export interface DbProduct {
@@ -205,6 +220,11 @@ export interface DbOrderItem {
   selectedCustomVariants?: Record<string, string>;
   modifiers?: Array<{ name: string; amount: number }>;
   notes?: string;
+  quantitySelections?: Record<string, number>;
+  preparation?: string[];
+  ingredientInstructions?: string[];
+  recipeSnapshot?: Record<string, number>;
+  recipeCostSnapshot?: number;
 }
 
 import { SupabaseDbAdapter } from './supabaseAdapter';
@@ -223,6 +243,7 @@ export interface DbOrder {
   operationId?: string;
   deviceId?: string;
   channel?: 'POS' | 'QR_PICKUP';
+  entrypoint?: 'POS' | 'KIOSK';
   paymentProvider?: 'MERCADO_PAGO' | 'STRIPE';
   pickup?: {
     accessTokenHash: string;
@@ -1064,7 +1085,7 @@ export class JsonDbAdapter implements DbAdapter {
 
   private async openCashSessionUnsafe(session: DbCashSession): Promise<boolean> {
     await this.read();
-    if (this.data.cashSessions.some((entry) => !entry.closedAt)) return false;
+    if (this.data.cashSessions.some((entry) => !entry.closedAt || entry.id === session.id)) return false;
     this.data.cashSessions.push(session);
     this.data.cashRegister = { ...session.openingDenominations };
     await this.save();

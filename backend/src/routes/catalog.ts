@@ -4,6 +4,9 @@ import { z } from 'zod';
 import { db } from '../db';
 import { requireRole } from '../middleware/auth';
 import { AppError } from '../utils/errors';
+import { modifierGroupSchema, modifierAvailability, availableRecipeStock, validateModifierConfiguration } from '../domain/modifiers';
+import { orderItemInputSchema } from '../domain/orders';
+import { priceOrder } from '../domain/pricing';
 import type { RouteContext } from './context';
 
 const productSchema = z.object({
@@ -16,10 +19,7 @@ const productSchema = z.object({
   customizable: z.boolean().default(false),
   image: z.string().max(2_048).default(''),
   recipe: z.record(z.string().min(1).max(100), z.number().min(0).max(1_000_000)).optional(),
-  custom_variants: z.array(z.object({
-    title: z.string().trim().min(1).max(80),
-    options: z.array(z.object({ name: z.string().trim().min(1).max(80), priceModifier: z.number().min(0).max(100_000) })).max(30),
-  })).max(20).optional(),
+  custom_variants: z.array(modifierGroupSchema).max(20).optional(),
 });
 const hasExpectedImageSignature = (buffer: Buffer, mimeType: 'image/jpeg' | 'image/png' | 'image/webp') => {
   if (mimeType === 'image/jpeg') return buffer.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]));
@@ -28,6 +28,14 @@ const hasExpectedImageSignature = (buffer: Buffer, mimeType: 'image/jpeg' | 'ima
 };
 
 export function registerCatalogRoutes(app: express.Express, { env, requireAuth, audit, broadcast }: RouteContext): void {
+// A quote is advisory; order creation independently repeats pricing and atomic stock checks.
+app.post('/api/orders/quote', requireAuth, requireRole('POS_DEVICE', 'ADMIN', 'MANAGER', 'BARISTA'), async (req, res, next) => {
+  try {
+    const input = z.object({ items: z.array(orderItemInputSchema).min(1).max(50) }).parse(req.body);
+    const pricing = priceOrder(await db.getProducts(), input.items, await db.getRawInventory());
+    res.json({ total: pricing.total, items: pricing.items.map(item => ({ productId: item.productId, unitPrice: item.unitPrice, totalPrice: item.totalPrice, preparation: item.preparation, modifiers: item.modifiers })) });
+  } catch (error) { next(error); }
+});
 // Image Upload
 app.post('/api/upload-image', requireAuth, requireRole('ADMIN', 'MANAGER'), express.json({ limit: '1500kb' }), async (req, res, next) => {
   try {
@@ -64,8 +72,9 @@ app.get('/api/products', async (_req, res) => {
     const ingredients = new Map(raw.map((entry) => [entry.id, entry]));
     res.json(products.map((product) => {
       const recipe = Object.entries(product.recipe ?? {}).filter(([, quantity]) => quantity > 0);
-      const stock = recipe.length ? Math.max(0, Math.min(...recipe.map(([id, quantity]) => { const ingredient = ingredients.get(id); return ingredient ? Math.floor((ingredient.stock - (ingredient.reservedStock ?? 0)) / quantity) : 0; }))) : undefined;
-      return { ...product, stock };
+      const baseStock = recipe.length ? Math.max(0, Math.min(...recipe.map(([id, quantity]) => { const ingredient = ingredients.get(id); return ingredient ? Math.floor((ingredient.stock - (ingredient.reservedStock ?? 0)) / quantity) : 0; }))) : 0;
+      const stock = baseStock || availableRecipeStock(product, raw);
+      return { ...product, stock, custom_variants: modifierAvailability(product, raw) };
     }));
   } catch (error) {
     console.error('Error al obtener productos:', error);
@@ -76,6 +85,7 @@ app.get('/api/products', async (_req, res) => {
 app.post('/api/products', requireAuth, requireRole('ADMIN', 'MANAGER'), async (req, res, next) => {
   try {
     const product = productSchema.parse(req.body);
+    validateModifierConfiguration(product, await db.getRawInventory());
     await db.createProduct(product);
     await audit(req, { action: 'PRODUCT_CHANGE', entity: 'PRODUCT', entityId: product.id, after: product });
     broadcast({ type: 'inventory_updated' });
@@ -91,6 +101,7 @@ app.put('/api/products/:id', requireAuth, requireRole('ADMIN', 'MANAGER'), async
     if (!before) throw new AppError(404, 'PRODUCT_NOT_FOUND', 'Producto no encontrado.');
     const parsed = productSchema.parse(req.body);
     if (parsed.id !== req.params.id) throw new AppError(400, 'PRODUCT_ID_MISMATCH', 'El identificador del producto no coincide con la ruta.');
+    validateModifierConfiguration(parsed, await db.getRawInventory());
     await db.updateProduct(req.params.id, parsed);
     await audit(req, { action: 'PRODUCT_CHANGE', entity: 'PRODUCT', entityId: req.params.id, before, after: parsed });
     broadcast({ type: 'inventory_updated' });
@@ -133,6 +144,8 @@ app.post('/api/products/recipe', requireAuth, requireRole('ADMIN', 'MANAGER'), a
       recipe: z.record(z.string().min(1).max(100), z.number().min(0).max(1_000_000)),
     }).parse(req.body);
     const before = (await db.getProducts()).find((product) => product.id === productId);
+    if (!before) throw new AppError(404, 'PRODUCT_NOT_FOUND', 'Producto no encontrado.');
+    validateModifierConfiguration({ ...before, recipe }, await db.getRawInventory());
     await db.updateProductRecipe(productId, recipe);
     await audit(req, { action: 'PRODUCT_CHANGE', entity: 'RECIPE', entityId: productId, before: before?.recipe, after: recipe });
     broadcast({ type: 'inventory_updated' });

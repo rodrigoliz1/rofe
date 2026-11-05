@@ -7,7 +7,7 @@ and src/kiosk/productImages.json (product → files, status, art-direction promp
 
 Deterministic: same sources and settings → same bytes → same file names, so the files
 can be cached forever (vercel.json marks /products/* immutable). Re-run after replacing
-a source photo in scripts/product-images/sources.json; old hashed files are removed.
+a source photo in scripts/product-images/sources.json; old hashes remain for older clients.
 
 Requires Pillow (pip install pillow). Sources are never modified.
 """
@@ -70,9 +70,8 @@ def main() -> None:
                     files[str(target)] = {"url": f"/products/{name}", "bytes": len(data)}
                 entry[kind] = files
         manifest["products"][product_id] = entry
-    for stale in OUT_DIR.glob("*.webp"):
-        if stale.name not in produced:
-            stale.unlink()
+    # Existing clients may still reference older hashes during a rolling web update.
+    # Keep these small immutable files; pruning must be an explicit maintenance step.
     MANIFEST.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", "utf-8")
     for product_id, entry in manifest["products"].items():
         card = entry.get("card", {})
