@@ -10,12 +10,6 @@
       "includeFiles": "backend/dist/**"
     }
   },
-  "crons": [
-    {
-      "path": "/api/cron/pickup-reconcile",
-      "schedule": "0 12 * * *"
-    }
-  ],
   "rewrites": [
     {
       "source": "/api/:path*",

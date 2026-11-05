@@ -309,12 +309,6 @@ async function reconcilePendingPickup(): Promise<void> {
 }
 const reconcilePendingPickupThrottled = () => Date.now() - lastSweepAt >= 60_000 ? reconcilePendingPickup() : Promise.resolve();
 
-// Vercel Cron entry point. Vercel sends `Authorization: Bearer <CRON_SECRET>`.
-app.get('/api/cron/pickup-reconcile', async (req, res, next) => {
-  try {
-    if (!env.CRON_SECRET || req.header('authorization') !== `Bearer ${env.CRON_SECRET}`) throw new AppError(401, 'UNAUTHORIZED', 'No autorizado.');
-    await reconcilePendingPickup();
-    res.json({ ok: true });
   } catch (error) { next(error); }
 });
 

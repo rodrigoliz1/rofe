@@ -33,8 +33,6 @@ const envSchema = z.object({
   ENABLE_PAYMENT_SIMULATION: booleanFromString,
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   TRUST_PROXY: z.coerce.number().int().min(0).max(3).default(1),
-  // Vercel Cron sends `Authorization: Bearer $CRON_SECRET` to scheduled endpoints.
-  CRON_SECRET: z.string().min(16).optional(),
   // Serverless SSE: close streams before the function limit and poll the database for changes.
   SSE_MAX_DURATION_MS: z.coerce.number().int().min(0).max(3_600_000).default(0),
   REALTIME_POLL_MS: z.coerce.number().int().min(0).max(60_000).default(0),

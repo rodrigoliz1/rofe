@@ -145,14 +145,14 @@ Pasos:
 
 1. Importa el repositorio en Vercel (Framework: Vite; la raíz del proyecto es la raíz del repo).
 2. **No** configures `VITE_API_URL` (o déjalo vacío): el frontend llama a `/api` en su propio dominio.
-3. Agrega como variables de entorno (Production) todas las de `backend/.env.example`: `NODE_ENV=production`, secretos JWT, Supabase, Mercado Pago, Stripe, `DEVICE_ENROLLMENT_SECRET`, `AUTH_BOOTSTRAP_ADMIN_HASH` y `CRON_SECRET`. Los dominios `*.vercel.app` del proyecto se agregan solos a `ALLOWED_ORIGINS`; incluye ahí sólo dominios propios. `PUBLIC_ORDERING_URL` debe ser el dominio final.
+3. Agrega como variables de entorno (Production) todas las de `backend/.env.example`: `NODE_ENV=production`, secretos JWT, Supabase, Mercado Pago, Stripe, `DEVICE_ENROLLMENT_SECRET` y `AUTH_BOOTSTRAP_ADMIN_HASH`. Los dominios `*.vercel.app` del proyecto se agregan solos a `ALLOWED_ORIGINS`; incluye ahí sólo dominios propios. `PUBLIC_ORDERING_URL` debe ser el dominio final.
 4. Actualiza las URLs de webhooks: `https://<tu-dominio>/api/webhooks/mercadopago` y `https://<tu-dominio>/api/webhooks/stripe`.
 5. Aplica las migraciones de Supabase (incluida `006_orders_updated_at_trigger.sql`) antes del primer despliegue.
 
 Diferencias por ser serverless:
 
 - **Tiempo real**: cada instancia tiene su propia memoria, así que el stream SSE (`/api/events`) consulta `orders.updated_at` cada `REALTIME_POLL_MS` (3 s) y reenvía cambios; se cierra a los `SSE_MAX_DURATION_MS` (270 s) y el cliente reconecta solo.
-- **Conciliación de pedidos QR**: el webhook de Stripe es la vía principal. Además, mientras haya un KDS/POS conectado se barre cada minuto, y Vercel Cron llama `/api/cron/pickup-reconcile` (diario en plan Hobby; en Pro puedes cambiar `schedule` en `vercel.json` a `*/5 * * * *`).
+- **Conciliación de pedidos QR**: el webhook de Stripe es la vía principal; además se consulta Stripe cuando el cliente revisa su pedido y, mientras haya un POS/KDS conectado, se barren los pendientes cada minuto. No se usan tareas programadas.
 - **Rate limiting** es por instancia (en memoria); es una defensa básica, no global.
 - La base JSON local no funciona en Vercel (sistema de archivos efímero); producción exige Supabase.
 
