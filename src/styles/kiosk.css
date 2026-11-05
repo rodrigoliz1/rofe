@@ -200,6 +200,17 @@ html.kiosk-mode body {
 .kiosk-sheet-handle { display: flex; justify-content: center; align-items: center; flex-shrink: 0; min-height: 36px; background: transparent; border: 0; }
 .kiosk-sheet-handle span { width: 48px; height: 5px; border-radius: 3px; background: var(--border-color); }
 
+/* The POS breakpoints in workspace.css/responsive.css switch to page scrolling and
+   fixed minimum heights below 1000px; the kiosk always scrolls inside its regions. */
+.kiosk-catalog .catalog-container { flex-shrink: 1; overflow: hidden; }
+.kiosk-catalog .products-grid { min-height: 0; overflow-x: hidden; overflow-y: auto; }
+.kiosk-cart .cart-sidebar { flex-shrink: 1; }
+.kiosk-cart .cart-items-wrapper { max-height: none; }
+.kiosk-cart .cart-footer { display: block; }
+.kiosk-cart .cart-summary-row { margin: 0 0 14px; }
+.kiosk-cart .checkout-btn { width: 100%; min-width: 0; }
+.kiosk-cart .empty-cart { flex-direction: column; justify-content: center; padding: 24px; }
+
 /* ---------- Order bar (portrait) ---------- */
 .kiosk-cart-bar { display: flex; align-items: center; gap: 12px; padding: 12px var(--k-gap); border-top: 1px solid var(--border-color); background: var(--bg-secondary); }
 .kiosk-cart-summary { display: flex; align-items: center; gap: 14px; flex: 1; min-width: 0; min-height: 64px; padding: 0 8px; background: transparent; border: 0; color: var(--text-primary); text-align: left; }

@@ -13,8 +13,8 @@ const isTextField = (element: Element | null) => element instanceof HTMLElement 
 export function computeStacked(): boolean {
   const width = window.innerWidth;
   if (width < 760) return true;
-  const type = window.screen?.orientation?.type;
-  const screenPortrait = type ? type.startsWith('portrait') : window.screen.height > window.screen.width;
+  // screen.width/height follow the device rotation on Android Chrome and WebView.
+  const screenPortrait = window.screen.height > window.screen.width;
   const viewportPortrait = window.innerHeight > width;
   return screenPortrait && (viewportPortrait || isTextField(document.activeElement));
 }

@@ -23,7 +23,8 @@ export function readKioskSession(maxAgeMs: number, now = Date.now()): KioskSessi
 
 export function saveKioskSession(session: Omit<KioskSession, 'savedAt'>, now = Date.now()): void {
   try {
-    if (!session.started && session.cart.length === 0) sessionStorage.removeItem(KEY);
+    // Only a real, unfinished order is worth restoring; an empty menu reloads to the welcome screen.
+    if (session.cart.length === 0) sessionStorage.removeItem(KEY);
     else sessionStorage.setItem(KEY, JSON.stringify({ ...session, savedAt: now }));
   } catch { /* Private mode or full storage: the order simply is not restored after a reload. */ }
 }

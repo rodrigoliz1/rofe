@@ -56,7 +56,10 @@ test('kiosk uses the enrolled POS on cold start even after staff access', async 
   await expect(page.getByText('ORDENAR AQUÍ')).toBeVisible();
   await page.getByText('ORDENAR AQUÍ').click();
   await expect(page.getByRole('heading', { name: 'MENÚ', exact: true })).toBeVisible();
-  await page.getByTitle('Panel Barista').click();
+  // The customer-facing kiosk has no visible staff button: hold the logo for 5 s.
+  const logo = (await page.locator('.kiosk-header-brand').boundingBox())!;
+  await page.mouse.move(logo.x + 20, logo.y + logo.height / 2);
+  await page.mouse.down(); await page.waitForTimeout(5_300); await page.mouse.up();
   await page.getByLabel('Correo').fill('admin@rofe.test');
   await page.getByLabel('Contraseña o PIN').fill('TestAdmin123!');
   await page.getByRole('button', { name: 'Ingresar', exact: true }).click();
