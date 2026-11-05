@@ -28,6 +28,8 @@ export const createOrderSchema = z.object({
   items: z.array(orderItemInputSchema).min(1).max(50),
   paymentMethod: z.enum(['card', 'cash']),
   discountAuthorizationToken: z.string().max(2048).optional(),
+  /** Change voucher (cupón de cambio) to use as a discount. */
+  voucherCode: z.string().trim().min(10).max(40).optional(),
   notes: z.string().trim().max(500).optional(),
 });
 

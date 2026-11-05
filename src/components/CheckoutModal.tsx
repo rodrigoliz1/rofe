@@ -20,6 +20,35 @@ interface CheckoutModalProps {
   onLockChange?: (locked: boolean) => void;
 }
 
+/** «¿Tienes un cupón de cambio?»: validated with the server before it changes the total. */
+function VoucherField({ applied, disabled, onApply, onRemove }: { applied?: { code: string; amount: number }; disabled: boolean; onApply: (voucher: { code: string; balance: number }) => void; onRemove: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [code, setCode] = useState('');
+  const [checking, setChecking] = useState(false);
+  const [message, setMessage] = useState('');
+  if (applied) {
+    return <div className="voucher-applied" role="status"><span>Cupón {applied.code}</span><strong>−${applied.amount.toFixed(2)}</strong><button type="button" className="checkout-secondary-action" onClick={onRemove} disabled={disabled}>Quitar</button></div>;
+  }
+  if (!open) return <button type="button" className="checkout-secondary-action" onClick={() => setOpen(true)} disabled={disabled}>¿Tienes un cupón de cambio?</button>;
+  const check = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!code.trim() || checking) return;
+    setChecking(true); setMessage('');
+    try {
+      const { voucher } = await apiJson<{ voucher: { code: string; balance: number; status: string } }>(`/api/vouchers/${encodeURIComponent(code.trim())}`);
+      if (voucher.status !== 'ACTIVE' || voucher.balance <= 0) setMessage('Este cupón ya fue utilizado.');
+      else onApply(voucher);
+    } catch (cause) { setMessage(cause instanceof Error ? cause.message : 'No pudimos validar el cupón.'); }
+    finally { setChecking(false); }
+  };
+  return <form className="voucher-form" onSubmit={check}>
+    <label htmlFor="voucher-input">Código del cupón</label>
+    <div><input id="voucher-input" className="name-input" value={code} onChange={(event) => setCode(event.target.value)} placeholder="XXXX-XXXX-XX" autoComplete="off" autoCapitalize="characters" spellCheck={false} maxLength={24} />
+    <button type="submit" className="btn btn-primary" disabled={checking || !code.trim()}>{checking ? 'Validando…' : 'Aplicar'}</button></div>
+    {message && <p className="payment-notice" role="alert">{message}</p>}
+  </form>;
+}
+
 export function CheckoutModal({ total, cartItems, orders, onPaymentSuccess, onClose, kiosk, onLockChange }: CheckoutModalProps) {
   const payment = useCheckout(cartItems, total, orders);
   const { draft, setDraft, step, setStep, error, setError, busy, offline } = payment;
@@ -35,6 +64,12 @@ export function CheckoutModal({ total, cartItems, orders, onPaymentSuccess, onCl
   const [authorizing, setAuthorizing] = useState(false);
   const amount = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(draft.total);
   const folio = draft.order?.folio ?? `R-${draft.operationId.replaceAll('-', '').slice(0, 10).toUpperCase()}`;
+  const coveredByVoucher = Boolean(draft.voucher) && draft.total <= 0;
+  const applyVoucher = (voucher: { code: string; balance: number }) => {
+    const amount = Math.round(Math.min(voucher.balance, total) * 100) / 100;
+    setDraft({ ...draft, voucher: { code: voucher.code, amount }, total: Math.round((total - amount) * 100) / 100 });
+  };
+  const removeVoucher = () => setDraft({ ...draft, voucher: undefined, total });
   const finish = () => { clearCheckout(); onPaymentSuccess(draft.order?.id ?? draft.operationId, draft.customerName); };
   const completed = step === 'success' || step === 'cash';
   const locked = draft.submitted && step !== 'cancelled' && !completed;
@@ -78,18 +113,19 @@ export function CheckoutModal({ total, cartItems, orders, onPaymentSuccess, onCl
         <button className="confirm-name-btn" type="submit" disabled={!draft.customerName.trim()}>CONTINUAR</button>
       </form>}
       {step === 'method' && <div className="checkout-step-content width-100">
-        <h2 id="checkout-title">Elige cómo pagar</h2>
+        <h2 id="checkout-title">{coveredByVoucher ? 'Tu cupón cubre el pedido' : 'Elige cómo pagar'}</h2>
         <p className="checkout-step-text">Ya casi está, {draft.customerName}.</p>
-        <div className="payment-methods-grid">
+        {!payment.discountToken && <VoucherField applied={draft.voucher} disabled={busy} onApply={applyVoucher} onRemove={removeVoucher} />}
+        {coveredByVoucher ? <button className="confirm-name-btn" onClick={() => void payment.submit('cash')} disabled={busy}>{busy ? 'Confirmando…' : 'CONFIRMAR PEDIDO'}</button> : <div className="payment-methods-grid">
           <button className="payment-method-btn" onClick={() => void payment.submit('card')} disabled={busy || !navigator.onLine}>
             <UiIcon name="card" size={32} /><span className="payment-method-label">TARJETA DE DÉBITO/CRÉDITO</span><span className="payment-method-desc">Acerca o inserta tu tarjeta en Mercado Pago Point.</span>
           </button>
           <button className="payment-method-btn" onClick={() => void payment.submit('cash')} disabled={busy}>
             <UiIcon name="cash" size={32} /><span className="payment-method-label">PAGO EN EFECTIVO</span><span className="payment-method-desc">Registra el pedido y paga en el mostrador.</span>
           </button>
-        </div>
+        </div>}
         {!navigator.onLine && <p className="payment-notice">Sin internet: sólo podemos guardar pedidos en efectivo.</p>}
-        {!kiosk && <button type="button" className="checkout-secondary-action" onClick={() => { setError(''); setStep('discount'); }}>{payment.discountToken ? 'Descuento autorizado' : 'Aplicar descuento con autorización'}</button>}
+        {!kiosk && !draft.voucher && <button type="button" className="checkout-secondary-action" onClick={() => { setError(''); setStep('discount'); }}>{payment.discountToken ? 'Descuento autorizado' : 'Aplicar descuento con autorización'}</button>}
         <button type="button" className="checkout-secondary-action" onClick={() => setStep('name')}>Cambiar nombre</button>
       </div>}
       {step === 'discount' && <form onSubmit={authorizeDiscount} className="name-form">

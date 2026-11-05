@@ -63,12 +63,12 @@ export function useCheckout(cartItems: CartItem[], total: number, orders: Order[
     const next = { ...draft, paymentMethod: method, submitted: true };
     try {
       saveCheckout(next); setDraft(next);
-      const payload = { operationId: next.operationId, customerName: next.customerName.trim(), items: next.cartItems.map((item) => ({ productId: item.product.id, quantity: item.quantity, customization: item.customization, selectedCustomVariants: item.selectedCustomVariants })), paymentMethod: method, discountAuthorizationToken: discountToken || undefined };
+      const payload = { operationId: next.operationId, customerName: next.customerName.trim(), items: next.cartItems.map((item) => ({ productId: item.product.id, quantity: item.quantity, customization: item.customization, selectedCustomVariants: item.selectedCustomVariants })), paymentMethod: method, discountAuthorizationToken: discountToken || undefined, voucherCode: next.voucher?.code };
       let result: { order: Order; mode: string };
       try {
         result = await apiJson('/api/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       } catch (cause) {
-        if (!(cause instanceof ConnectionError) || method !== 'cash' || discountToken) throw cause;
+        if (!(cause instanceof ConnectionError) || method !== 'cash' || discountToken || next.voucher) throw cause;
         const device = await getDeviceCredentials();
         if (!device) throw new Error('Esta terminal perdió su autorización. Solicita ayuda.', { cause });
         await enqueueCashOrder({ operationId: next.operationId, deviceId: device.deviceId, type: 'CREATE_CASH_ORDER', payload });

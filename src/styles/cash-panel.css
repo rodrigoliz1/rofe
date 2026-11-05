@@ -1,0 +1,86 @@
+/* Barista cash collection: tap-to-count tiles, change vouchers. */
+.cash-panel { display: flex; flex-direction: column; gap: 14px; }
+.cash-panel-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.cash-panel-summary > div { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-tertiary); }
+.cash-panel-summary span { color: var(--text-secondary); font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; }
+.cash-panel-summary strong { font-size: 24px; font-variant-numeric: tabular-nums; }
+.cash-panel-summary .is-missing strong { color: var(--status-error); }
+.cash-panel-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.cash-panel-actions .btn { min-height: 52px; padding: 0 22px; font-size: 16px; }
+.cash-panel-actions .btn-primary { flex: 1 1 180px; }
+.cash-panel-wide { width: 100%; min-height: 56px; }
+.cash-panel-hint { margin: 0; color: var(--text-muted); font-size: 13px; }
+
+.cash-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; }
+.cash-tile { position: relative; display: flex; min-height: 84px; border-radius: 14px; }
+.cash-tile-add {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: inherit;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  transition: transform 80ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+.cash-tile.is-bill .cash-tile-add { background: linear-gradient(135deg, #202a22 0%, #1a1f1b 100%); }
+.cash-tile-add:active { transform: scale(0.97); }
+.cash-tile.has-count .cash-tile-add { border-color: var(--accent-warm); background: #2a261c; padding-right: 58px; }
+.cash-tile-kind { color: var(--text-secondary); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; }
+.cash-tile-amount { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.cash-tile-count { color: var(--accent-warm); font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+/* "−" sits on the side, inside the tile: everywhere else on the tile adds one. */
+.cash-tile-minus {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  bottom: 6px;
+  width: 46px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.cash-tile-minus:active { transform: scale(0.95); }
+
+.cash-insufficient { padding: 18px; border: 1px solid rgba(255, 214, 10, 0.35); border-radius: 14px; background: #2a2410; }
+.cash-insufficient h3 { color: #ffd60a; font-size: 20px; }
+.cash-insufficient p { color: var(--text-primary); line-height: 1.5; }
+.cash-insufficient .cash-panel-actions { flex-direction: column; }
+.cash-insufficient .cash-panel-actions .btn { width: 100%; flex: none; }
+
+.cash-voucher { align-items: stretch; text-align: center; }
+.cash-voucher h3 { font-size: 20px; }
+.cash-voucher-give { padding: 12px; border-radius: 12px; background: var(--bg-tertiary); }
+.cash-voucher-ticket { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 20px; border-radius: 16px; background: #f6f1e7; color: #111311; }
+.cash-voucher-kicker { font-size: 12px; letter-spacing: 0.2em; color: #5c5650; }
+.cash-voucher-amount { font-size: 34px; }
+.cash-voucher-qr { width: min(240px, 70vw); aspect-ratio: 1; }
+.cash-voucher-qr svg { width: 100%; height: 100%; }
+.cash-voucher-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 26px; font-weight: 700; letter-spacing: 0.12em; user-select: all; -webkit-user-select: all; }
+.cash-voucher-help { max-width: 34ch; color: #3d3833; font-size: 14px; line-height: 1.45; }
+
+/* Barista voucher lookup / payout */
+.voucher-panel { display: flex; flex-direction: column; gap: 16px; max-width: 640px; padding: 24px; }
+.voucher-panel form { display: flex; flex-wrap: wrap; gap: 10px; }
+.voucher-panel input { flex: 1 1 220px; min-height: 52px; padding: 0 14px; border: 1px solid var(--border-color); border-radius: 10px; background: var(--bg-tertiary); color: var(--text-primary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 20px; letter-spacing: 0.08em; text-transform: uppercase; }
+.voucher-panel .btn { min-height: 52px; padding: 0 20px; }
+.voucher-card { display: flex; flex-direction: column; gap: 6px; padding: 18px; border: 1px solid var(--border-color); border-radius: 14px; background: var(--bg-tertiary); }
+.voucher-card strong { font-size: 28px; font-variant-numeric: tabular-nums; }
+.voucher-card .voucher-status { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-secondary); }
+.voucher-scanner { position: relative; overflow: hidden; border-radius: 14px; background: #000; aspect-ratio: 4 / 3; }
+.voucher-scanner video { width: 100%; height: 100%; object-fit: cover; }
+.voucher-scanner-frame { position: absolute; inset: 18%; border: 3px solid rgba(222, 201, 151, 0.9); border-radius: 18px; pointer-events: none; }

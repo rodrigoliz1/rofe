@@ -28,6 +28,8 @@ import { totalDenominations } from './domain/cash';
 import { MercadoPagoService } from './payments/mercadoPago';
 import { z } from 'zod';
 import { buildOperationalReport, salesCsv } from './accounting/reports';
+import { generateVoucherCode, normalizeVoucherCode, voucherQrPayload } from './domain/vouchers';
+import type { DbChangeVoucher } from './db';
 
 dotenv.config();
 
@@ -345,6 +347,21 @@ app.post('/api/orders', requireAuth, requireRole('POS_DEVICE'), async (req, res,
       : undefined;
     const pricing = applyAuthorizedDiscount(basePricing, authorizedDiscount);
     const orderId = input.operationId;
+    // Change voucher: discount up to its balance, reserved before the order is stored and
+    // given back if storing fails or the order is cancelled.
+    let voucherUse: { code: string; amount: number } | undefined;
+    if (input.voucherCode) {
+      if (authorizedDiscount) throw new AppError(400, 'VOUCHER_WITH_DISCOUNT', 'Un cupón no se combina con otro descuento.');
+      const voucher = await findVoucher(input.voucherCode);
+      if (voucher.status !== 'ACTIVE' || voucher.balance <= 0) throw new AppError(409, 'VOUCHER_NOT_ACTIVE', 'Este cupón ya fue utilizado.');
+      const amount = toMoney(Math.min(voucher.balance, pricing.total));
+      if (amount > 0) {
+        await db.applyChangeVoucherToOrder({ code: voucher.code, orderId, operationId: input.operationId, amount }).catch((error: unknown) => { throw voucherError(error); });
+        voucherUse = { code: voucher.code, amount };
+        pricing.discount = toMoney((pricing.discount ?? 0) + amount);
+        pricing.total = toMoney(pricing.total - amount);
+      }
+    }
     const folio = `R-${orderId.replaceAll('-', '').slice(0, 10).toUpperCase()}`;
 
     const newOrder = {
@@ -356,8 +373,8 @@ app.post('/api/orders', requireAuth, requireRole('POS_DEVICE'), async (req, res,
       items: pricing.items,
       subtotal: pricing.subtotal,
       discount: pricing.discount,
-      discountType: pricing.discountAuthorization?.type,
-      discountReason: pricing.discountAuthorization?.reason,
+      discountType: voucherUse ? 'VOUCHER' : pricing.discountAuthorization?.type,
+      discountReason: voucherUse ? `Cupón de cambio ${voucherUse.code}` : pricing.discountAuthorization?.reason,
       discountAuthorizedBy: pricing.discountAuthorization?.authorizedBy,
       tax: pricing.tax,
       total: pricing.total,
@@ -368,6 +385,33 @@ app.post('/api/orders', requireAuth, requireRole('POS_DEVICE'), async (req, res,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
+
+    if (voucherUse) {
+      // A failed insert must not keep the voucher balance reserved.
+      const inserted = await db.createOrder(newOrder).catch(async (error: unknown) => { await db.releaseChangeVoucherForOrder(orderId); throw error; });
+      if (!inserted) {
+        const replay = await db.getOrderByOperationId(input.operationId);
+        res.status(200).json({ order: replay, mode: replay?.paymentMethod === 'cash' ? 'cash' : 'production', idempotentReplay: true });
+        return;
+      }
+      if (pricing.total === 0) {
+        await db.confirmOrderPayment(orderId, `voucher-${orderId}`, calculateRecipeConsumption(pricing.items));
+        const order = await db.getOrderById(orderId);
+        broadcast({ type: 'order_paid', orderId, order });
+        broadcast({ type: 'inventory_updated' });
+        res.status(201).json({ order, mode: 'voucher' });
+        return;
+      }
+      if (input.paymentMethod === 'cash') {
+        broadcast({ type: 'order_updated', orderId, order: newOrder });
+        broadcast({ type: 'inventory_updated' });
+        res.status(201).json({ order: newOrder, mode: 'cash' });
+        return;
+      }
+      const order = simulation ? newOrder : await sendOrderToPoint(db, mercadoPago, newOrder);
+      res.status(201).json({ order, mode: simulation ? 'simulation' : 'production' });
+      return;
+    }
 
     if (pricing.total === 0) {
       await db.createOrder(newOrder);
@@ -445,6 +489,7 @@ app.post('/api/orders/:id/cancel-payment', requireAuth, requireRole('POS_DEVICE'
       if (!cancelled) throw new AppError(409, 'CANCELLATION_PENDING', 'Cancelación solicitada. Espera la confirmación en la terminal antes de iniciar otro pago.');
     }
     await db.updateOrderStatus(order.id, 'CANCELLED', undefined, undefined, 'Cancelado desde el punto de venta');
+    await db.releaseChangeVoucherForOrder(order.id);
     order = (await db.getOrders()).find((entry) => entry.id === order!.id)!;
     await auditSensitive(req, { action: 'ORDER_CANCEL', entity: 'ORDER', entityId: order.id });
     broadcast({ type: 'order_updated', orderId: order.id, order });
@@ -570,6 +615,7 @@ app.post('/api/orders/:id/status', requireAuth, requireRole('ADMIN', 'MANAGER', 
     });
 
     if (status === 'CANCELLED') {
+      await db.releaseChangeVoucherForOrder(id);
       await securityStore.addAudit({ userId: req.principal!.subjectId, deviceId: currentOrder.deviceId, action: 'ORDER_CANCEL', entity: 'ORDER', entityId: id, before: { status: currentOrder.status }, after: { status, reason }, requestId: req.requestId, ip: req.ip, timestamp: new Date().toISOString() });
     }
 
@@ -619,11 +665,13 @@ app.post('/api/orders/:id/refund', requireAuth, requireRole('ADMIN', 'MANAGER'),
 app.post('/api/orders/:id/cash-payment', requireAuth, requireRole('ADMIN', 'MANAGER', 'BARISTA'), async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { receivedDenominations, changeDenominations, receivedAmount, changeAmount } = z.object({
+    const { receivedDenominations, changeDenominations, receivedAmount, changeAmount, voucherAmount = 0 } = z.object({
       receivedDenominations: z.record(z.string(), z.number().int().min(0)),
       changeDenominations: z.record(z.string(), z.number().int().min(0)),
       receivedAmount: z.number().min(0).max(1_000_000),
       changeAmount: z.number().min(0).max(1_000_000),
+      /** Change the drawer cannot give: issued as a change voucher for the customer. */
+      voucherAmount: z.number().min(0).max(1_000_000).optional(),
     }).strict().parse(req.body);
 
     const orders = await db.getOrders();
@@ -633,7 +681,7 @@ app.post('/api/orders/:id/cash-payment', requireAuth, requireRole('ADMIN', 'MANA
       return;
     }
     if (currentOrder.paymentStatus === 'APPROVED' || currentOrder.status === 'PAID') {
-      res.json({ message: 'El pago ya estaba registrado.', order: currentOrder, idempotentReplay: true });
+      res.json({ message: 'El pago ya estaba registrado.', order: currentOrder, voucher: publicVoucher(await db.getChangeVoucherForOrder(id)), idempotentReplay: true });
       return;
     }
     if (currentOrder.paymentMethod !== 'cash') throw new AppError(409, 'PAYMENT_METHOD_MISMATCH', 'Este pedido no fue creado para pago en efectivo.');
@@ -645,9 +693,11 @@ app.post('/api/orders/:id/cash-payment', requireAuth, requireRole('ADMIN', 'MANA
     if (Math.abs(receivedFromDenominations - Number(receivedAmount)) > 0.001 || Math.abs(changeFromDenominations - Number(changeAmount)) > 0.001) {
       throw new AppError(400, 'CASH_TOTAL_MISMATCH', 'Las denominaciones no coinciden con los importes capturados.');
     }
-    if (receivedFromDenominations < currentOrder.total || Math.abs(receivedFromDenominations - changeFromDenominations - currentOrder.total) > 0.001) {
+    if (receivedFromDenominations < currentOrder.total || Math.abs(receivedFromDenominations - changeFromDenominations - voucherAmount - currentOrder.total) > 0.001) {
       throw new AppError(400, 'CASH_PAYMENT_MISMATCH', 'El efectivo recibido y el cambio no cuadran con el total del pedido.');
     }
+    if (voucherAmount > 0 && !await db.vouchersAvailable()) throw new AppError(503, 'VOUCHERS_UNAVAILABLE', 'Los cupones de cambio no están habilitados todavía (falta la migración 007).');
+    const voucher = voucherAmount > 0 ? { code: generateVoucherCode(), amount: toMoney(voucherAmount), userId: req.principal!.subjectId } : undefined;
 
     const committed = await db.confirmCashOrderPayment({
       orderId: id,
@@ -657,10 +707,11 @@ app.post('/api/orders/:id/cash-payment', requireAuth, requireRole('ADMIN', 'MANA
       changeAmount,
       receivedDenominations,
       changeDenominations,
+      voucher,
     });
     if (!committed) {
       const replayOrder = (await db.getOrders()).find(o => o.id === id)!;
-      res.json({ message: 'El pago ya estaba registrado.', order: replayOrder, idempotentReplay: true });
+      res.json({ message: 'El pago ya estaba registrado.', order: replayOrder, voucher: publicVoucher(await db.getChangeVoucherForOrder(id)), idempotentReplay: true });
       return;
     }
     const updatedOrder = (await db.getOrders()).find(o => o.id === id)!;
@@ -675,9 +726,10 @@ app.post('/api/orders/:id/cash-payment', requireAuth, requireRole('ADMIN', 'MANA
     });
     broadcast({ type: 'cash_updated' });
 
-    await securityStore.addAudit({ userId: req.principal!.subjectId, deviceId: currentOrder.deviceId, action: 'CASH_PAYMENT', entity: 'ORDER', entityId: id, requestId: req.requestId, ip: req.ip, after: { receivedAmount, changeAmount }, timestamp: new Date().toISOString() });
+    await securityStore.addAudit({ userId: req.principal!.subjectId, deviceId: currentOrder.deviceId, action: 'CASH_PAYMENT', entity: 'ORDER', entityId: id, requestId: req.requestId, ip: req.ip, after: { receivedAmount, changeAmount, voucherAmount }, timestamp: new Date().toISOString() });
+    if (voucher) await securityStore.addAudit({ userId: req.principal!.subjectId, action: 'VOUCHER_ISSUED', entity: 'CHANGE_VOUCHER', entityId: voucher.code, after: { orderId: id, amount: voucher.amount }, requestId: req.requestId, ip: req.ip, timestamp: new Date().toISOString() });
 
-    res.json({ message: 'Pago en efectivo registrado con éxito.', order: updatedOrder });
+    res.json({ message: 'Pago en efectivo registrado con éxito.', order: updatedOrder, voucher: publicVoucher(voucher ? await db.getChangeVoucher(voucher.code) : undefined) });
   } catch (error) {
     next(error);
   }
@@ -754,6 +806,73 @@ app.post('/api/orders/:id/simulate-payment', requireAuth, requireRole('POS_DEVIC
 // Clear orders endpoint (for convenience / start new day)
 app.post('/api/orders/clear', requireAuth, requireRole('ADMIN'), (_req, res) => {
   res.status(410).json({ error: { code: 'HISTORY_IS_IMMUTABLE', message: 'Los pedidos no se borran. Usa cierre diario y filtros de historial.' } });
+});
+
+// --- Change vouchers (cupones de cambio) ---
+const voucherLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: 'draft-8', legacyHeaders: false, skipSuccessfulRequests: true, handler: (_req, res) => res.status(429).json({ error: { code: 'VOUCHER_RATE_LIMITED', message: 'Demasiados intentos con códigos de cupón. Espera unos minutos.' } }) });
+
+function publicVoucher(voucher: DbChangeVoucher | undefined) {
+  if (!voucher) return undefined;
+  return { code: voucher.code, amount: voucher.amount, balance: voucher.balance, status: voucher.status, createdAt: voucher.createdAt, qr: voucherQrPayload(voucher.code) };
+}
+
+function voucherError(error: unknown): AppError {
+  const message = error instanceof Error ? error.message : '';
+  if (message.includes('vouchers_migration_missing')) return new AppError(503, 'VOUCHERS_UNAVAILABLE', 'Los cupones de cambio no están habilitados todavía (falta la migración 007).');
+  if (message.includes('voucher_not_found')) return new AppError(404, 'VOUCHER_NOT_FOUND', 'No encontramos ese cupón. Revisa el código.');
+  if (message.includes('voucher_not_active')) return new AppError(409, 'VOUCHER_NOT_ACTIVE', 'Este cupón ya fue utilizado.');
+  if (message.includes('voucher_amount_mismatch')) return new AppError(409, 'VOUCHER_AMOUNT_MISMATCH', 'El saldo del cupón cambió. Vuelve a consultarlo.');
+  if (message.includes('insufficient_cash_denomination')) return new AppError(409, 'INSUFFICIENT_CASH', 'La caja no tiene esas denominaciones. Revisa el efectivo disponible.');
+  if (message.includes('cash_session_required')) return new AppError(409, 'CASH_SESSION_REQUIRED', 'Abre una sesión de caja antes de entregar efectivo.');
+  return error instanceof AppError ? error : new AppError(500, 'VOUCHER_FAILED', 'No pudimos procesar el cupón.');
+}
+
+async function findVoucher(rawCode: string): Promise<DbChangeVoucher> {
+  const code = normalizeVoucherCode(rawCode);
+  if (!code) throw new AppError(404, 'VOUCHER_NOT_FOUND', 'No encontramos ese cupón. Revisa el código.');
+  const voucher = await db.getChangeVoucher(code).catch((error: unknown) => { throw voucherError(error); });
+  if (!voucher) throw new AppError(404, 'VOUCHER_NOT_FOUND', 'No encontramos ese cupón. Revisa el código.');
+  return voucher;
+}
+
+app.get('/api/vouchers/:code', voucherLimiter, requireAuth, requireRole('POS_DEVICE', 'BARISTA', 'MANAGER', 'ADMIN'), async (req, res, next) => {
+  try { res.json({ voucher: publicVoucher(await findVoucher(String(req.params.code))) }); } catch (error) { next(error); }
+});
+
+// The drawer cannot give change and the customer prefers to cancel. Only an unpaid cash
+// order qualifies (no money was recorded and no inventory was consumed), so a barista may
+// do it; any other cancellation still requires a manager.
+app.post('/api/orders/:id/cancel-insufficient-change', requireAuth, requireRole('BARISTA', 'MANAGER', 'ADMIN'), async (req, res, next) => {
+  try {
+    const order = await db.getOrderById(String(req.params.id));
+    if (!order) throw new AppError(404, 'ORDER_NOT_FOUND', 'Pedido no encontrado.');
+    if (order.status === 'CANCELLED') { res.json({ order, idempotentReplay: true }); return; }
+    if (order.status !== 'PENDING_PAYMENT' || order.paymentMethod !== 'cash' || order.paymentStatus === 'APPROVED') {
+      throw new AppError(409, 'INVALID_ORDER_TRANSITION', 'Solo se puede cancelar así un pedido en efectivo que aún no se cobró.');
+    }
+    await db.updateOrderStatus(order.id, 'CANCELLED', undefined, undefined, 'Cambio insuficiente en caja: el cliente canceló');
+    await db.releaseChangeVoucherForOrder(order.id);
+    const updated = await db.getOrderById(order.id);
+    broadcast({ type: 'order_updated', orderId: order.id, order: updated });
+    broadcast({ type: 'inventory_updated' });
+    await securityStore.addAudit({ userId: req.principal!.subjectId, deviceId: order.deviceId, action: 'ORDER_CANCEL', entity: 'ORDER', entityId: order.id, before: { status: order.status }, after: { status: 'CANCELLED', reason: 'INSUFFICIENT_CHANGE' }, requestId: req.requestId, ip: req.ip, timestamp: new Date().toISOString() });
+    res.json({ order: updated });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/vouchers/:code/redeem-cash', voucherLimiter, requireAuth, requireRole('BARISTA', 'MANAGER', 'ADMIN'), async (req, res, next) => {
+  try {
+    const { operationId, denominations } = z.object({ operationId: z.string().uuid(), denominations: z.record(z.string(), z.number().int().min(0)) }).strict().parse(req.body);
+    const voucher = await findVoucher(String(req.params.code));
+    const amount = totalDenominations(denominations);
+    if (voucher.status === 'ACTIVE' && Math.abs(amount - voucher.balance) > 0.001) throw new AppError(400, 'VOUCHER_AMOUNT_MISMATCH', 'El efectivo entregado debe ser exactamente el saldo del cupón.');
+    const paid = await db.redeemChangeVoucherCash({ code: voucher.code, operationId, amount, denominations, userId: req.principal!.subjectId }).catch((error: unknown) => { throw voucherError(error); });
+    if (paid > 0) {
+      broadcast({ type: 'cash_updated' });
+      await securityStore.addAudit({ userId: req.principal!.subjectId, action: 'VOUCHER_CASH_PAYOUT', entity: 'CHANGE_VOUCHER', entityId: voucher.code, after: { amount: paid }, requestId: req.requestId, ip: req.ip, timestamp: new Date().toISOString() });
+    }
+    res.json({ voucher: publicVoucher(await db.getChangeVoucher(voucher.code)), paid, idempotentReplay: paid === 0 });
+  } catch (error) { next(error); }
 });
 
 app.get('/api/cash/denominations', requireAuth, requireRole('ADMIN', 'MANAGER', 'BARISTA'), async (_req, res, next) => {
@@ -937,7 +1056,7 @@ async function expectedCashForSession(openedAt: string, openingAmount: number): 
   const entries = (await db.getTransactionLedger()).filter((entry) => entry.created_at && new Date(entry.created_at).getTime() >= new Date(openedAt).getTime() && entry.status !== 'deleted');
   return toMoney(entries.reduce((total, entry) => {
     if (entry.type === 'payment' || entry.type === 'manual_income') return total + entry.amount;
-    if (entry.type === 'change' || entry.type === 'manual_expense' || entry.type === 'manual_investment' || entry.type === 'refund') return total - entry.amount;
+    if (entry.type === 'change' || entry.type === 'manual_expense' || entry.type === 'manual_investment' || entry.type === 'refund' || entry.type === 'voucher_payout') return total - entry.amount;
     return total;
   }, openingAmount));
 }

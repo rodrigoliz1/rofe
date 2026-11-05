@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import type { DbPickupSettings } from './db';
+import type { CashPaymentInput, DbChangeVoucher, DbPickupSettings } from './db';
 import type { DbAdapter, DbInventoryItem, DbCashTransaction, DbBakeryBatch, DbOrder, DbInventoryConsumption, DbSupplier, DbPurchase, DbWasteRecord, DbInventoryMovement, DbCashSession, DbDailyClosure, DbProductionBatch } from './db';
 
 export class SupabaseDbAdapter implements DbAdapter {
@@ -12,7 +12,10 @@ export class SupabaseDbAdapter implements DbAdapter {
   async initialize(): Promise<void> {
     const version = await this.supabase.rpc('rofe_schema_version');
     if (version.error && version.status === 0) throw new Error('No se pudo conectar con Supabase. Comprueba la conexión a internet y que el proyecto esté disponible.');
-    if (version.error || version.data !== 5) throw new Error('Aplica las migraciones de ROFÉ antes de iniciar el servidor (versión 5 requerida).');
+    // 5 = required schema. 7 adds change vouchers; without it the rest keeps working.
+    if (version.error || typeof version.data !== 'number' || version.data < 5) throw new Error('Aplica las migraciones de ROFÉ antes de iniciar el servidor (versión 5 o superior requerida).');
+    this.schemaVersion = version.data;
+    if (version.data < 7) console.warn(JSON.stringify({ level: 'warn', event: 'vouchers_unavailable', message: 'Aplica la migración 007_change_vouchers.sql para habilitar los cupones de cambio.' }));
     const criticalTables = [
       'products', 'orders', 'inventory', 'raw_inventory', 'cash_register', 'cash_transactions', 'cash_sessions',
       'cash_movements', 'daily_closures', 'daily_closings', 'suppliers', 'purchases', 'purchase_items',
@@ -144,7 +147,61 @@ export class SupabaseDbAdapter implements DbAdapter {
     return Boolean(data);
   }
 
-  async confirmCashOrderPayment(input: { orderId: string; paymentId: string; consumption: DbInventoryConsumption[]; receivedAmount: number; changeAmount: number; receivedDenominations: Record<string, number>; changeDenominations: Record<string, number> }): Promise<boolean> {
+  private schemaVersion = 0;
+
+  async vouchersAvailable(): Promise<boolean> { return this.schemaVersion >= 7; }
+
+  private requireVouchers() {
+    if (this.schemaVersion < 7) throw new Error('vouchers_migration_missing');
+  }
+
+  async getChangeVoucher(code: string): Promise<DbChangeVoucher | undefined> {
+    this.requireVouchers();
+    const { data, error } = await this.supabase.from('change_vouchers').select('*').eq('code', code).maybeSingle();
+    if (error) throw error;
+    return data ? mapVoucher(data) : undefined;
+  }
+
+  async getChangeVoucherForOrder(orderId: string): Promise<DbChangeVoucher | undefined> {
+    if (this.schemaVersion < 7) return undefined;
+    const { data, error } = await this.supabase.from('change_vouchers').select('*').eq('order_id', orderId).maybeSingle();
+    if (error) throw error;
+    return data ? mapVoucher(data) : undefined;
+  }
+
+  async redeemChangeVoucherCash(input: { code: string; operationId: string; amount: number; denominations: Record<string, number>; userId: string }): Promise<number> {
+    this.requireVouchers();
+    const { data, error } = await this.supabase.rpc('redeem_change_voucher_cash', { p_code: input.code, p_operation_id: input.operationId, p_amount: input.amount, p_denominations: input.denominations, p_user_id: input.userId });
+    if (error) throw new Error(error.message);
+    return Number(data);
+  }
+
+  async applyChangeVoucherToOrder(input: { code: string; orderId: string; operationId: string; amount: number }): Promise<boolean> {
+    this.requireVouchers();
+    const { data, error } = await this.supabase.rpc('apply_change_voucher_to_order', { p_code: input.code, p_order_id: input.orderId, p_operation_id: input.operationId, p_amount: input.amount });
+    if (error) throw new Error(error.message);
+    return Boolean(data);
+  }
+
+  async releaseChangeVoucherForOrder(orderId: string): Promise<number> {
+    if (this.schemaVersion < 7) return 0;
+    const { data, error } = await this.supabase.rpc('release_change_voucher_for_order', { p_order_id: orderId });
+    if (error) throw new Error(error.message);
+    return Number(data);
+  }
+
+  async confirmCashOrderPayment(input: CashPaymentInput): Promise<boolean> {
+    if (input.voucher) {
+      this.requireVouchers();
+      const { data, error } = await this.supabase.rpc('confirm_cash_payment_with_voucher', {
+        p_order_id: input.orderId, p_payment_id: input.paymentId, p_consumption: input.consumption,
+        p_received_amount: input.receivedAmount, p_change_amount: input.changeAmount,
+        p_received_denominations: input.receivedDenominations, p_change_denominations: input.changeDenominations,
+        p_voucher_code: input.voucher.code, p_voucher_amount: input.voucher.amount, p_user_id: input.voucher.userId,
+      });
+      if (error) throw new Error(error.message);
+      return Boolean(data);
+    }
     const { data, error } = await this.supabase.rpc('confirm_cash_payment', {
       p_order_id: input.orderId,
       p_payment_id: input.paymentId,
@@ -522,6 +579,11 @@ function mapCashSession(row: Record<string, unknown>): DbCashSession {
 
 // Supabase's dynamic schema returns untyped rows; conversion stays at this boundary.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapVoucher(row: Record<string, any>): DbChangeVoucher {
+  return { id: String(row.id), code: String(row.code), orderId: row.order_id ?? undefined, amount: Number(row.amount), balance: Number(row.balance), status: row.status, createdBy: row.created_by ?? undefined, createdAt: String(row.created_at), updatedAt: String(row.updated_at) };
+}
+
 function mapOrder(row: Record<string, any>): DbOrder { return {
       id: row.id,
       folio: row.folio || row.id,

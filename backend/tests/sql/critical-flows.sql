@@ -68,7 +68,54 @@ do $$ begin
   if confirm_order_payment('pg-qr-sale', 'pi_pg_test', '[{"ingredientId":"coffee_beans","quantity":18}]') then raise exception 'QR payment replay duplicated'; end if;
   if exists(select 1 from inventory_reservations where order_id = 'pg-qr-sale') then raise exception 'QR inventory reservation not released'; end if;
   if (select count(*) from cash_transactions where description like '%Q-PG-QR%') <> 1 then raise exception 'QR ledger duplicated'; end if;
-  if rofe_schema_version() <> 5 then raise exception 'QR migration missing'; end if;
+  if rofe_schema_version() <> 7 then raise exception 'voucher migration missing'; end if;
 end $$;
 insert into pickup_settings values (1, '{"enabled":false,"locationName":"ROFÉ"}');
+-- Change vouchers: cash payment with insufficient change issues one voucher; payout and order use are exactly-once.
+insert into orders (id, folio, operation_id, customer_name, items, total, status, payment_status, payment_method)
+values ('pg-voucher-sale', 'R-PG-VOUCH', 'b0000000-0000-4000-8000-000000000001', 'Postgres', '[]', 35, 'PENDING_PAYMENT', 'NOT_REQUIRED', 'cash');
+insert into orders (id, folio, customer_name, items, total, status, payment_status, payment_method)
+values ('pg-voucher-use', 'R-PG-VUSE', 'Postgres', '[]', 20, 'PENDING_PAYMENT', 'PENDING', 'card');
+do $$
+declare paid boolean; payout numeric; drawer_100 integer; drawer_20 integer;
+begin
+  update cash_register set count = 0 where denomination in ('bill_100', 'bill_20', 'coin_10', 'coin_5');
+  insert into cash_register(denomination, count) values ('bill_20', 1) on conflict(denomination) do update set count = 1;
+  -- $100 bill for $35: only $20 of the $65 change exists → voucher of $45.
+  select confirm_cash_payment_with_voucher('pg-voucher-sale', 'cash-pg-voucher-sale', '[]', 100, 20, '{"bill_100":1}', '{"bill_20":1}', 'PGTE-STVO-UC', 45, 'postgres-test') into paid;
+  if not paid then raise exception 'voucher payment not committed'; end if;
+  select confirm_cash_payment_with_voucher('pg-voucher-sale', 'cash-pg-voucher-sale', '[]', 100, 20, '{"bill_100":1}', '{"bill_20":1}', 'PGTE-STVO-UD', 45, 'postgres-test') into paid;
+  if paid then raise exception 'voucher payment replay duplicated'; end if;
+  if (select count(*) from change_vouchers where order_id = 'pg-voucher-sale') <> 1 then raise exception 'voucher not issued exactly once'; end if;
+  if (select balance from change_vouchers where code = 'PGTE-STVO-UC') <> 45 then raise exception 'voucher balance incorrect'; end if;
+  -- Use $20 of it on another order, then cancel that order: the balance comes back once.
+  if not apply_change_voucher_to_order('PGTE-STVO-UC', 'pg-voucher-use', 'a0000000-0000-4000-8000-000000000001', 20) then raise exception 'voucher not applied'; end if;
+  if apply_change_voucher_to_order('PGTE-STVO-UC', 'pg-voucher-use', 'a0000000-0000-4000-8000-000000000001', 20) then raise exception 'voucher applied twice'; end if;
+  if (select balance from change_vouchers where code = 'PGTE-STVO-UC') <> 25 then raise exception 'voucher order use incorrect'; end if;
+  if release_change_voucher_for_order('pg-voucher-use') <> 20 then raise exception 'voucher not released'; end if;
+  if release_change_voucher_for_order('pg-voucher-use') <> 0 then raise exception 'voucher released twice'; end if;
+  if (select balance from change_vouchers where code = 'PGTE-STVO-UC') <> 45 then raise exception 'voucher balance not restored'; end if;
+  -- Payout needs the exact balance and real denominations in the drawer.
+  begin
+    perform redeem_change_voucher_cash('PGTE-STVO-UC', 'a0000000-0000-4000-8000-000000000002', 45, '{"bill_20":2,"coin_5":1}', 'postgres-test');
+    raise exception 'voucher payout without cash was accepted';
+  exception when raise_exception then
+    if SQLERRM not like 'insufficient_cash_denomination:%' then raise; end if;
+  end;
+  if (select balance from change_vouchers where code = 'PGTE-STVO-UC') <> 45 then raise exception 'failed payout changed the voucher'; end if;
+  insert into cash_register(denomination, count) values ('bill_20', 2), ('coin_5', 1) on conflict(denomination) do update set count = excluded.count;
+  select redeem_change_voucher_cash('PGTE-STVO-UC', 'a0000000-0000-4000-8000-000000000003', 45, '{"bill_20":2,"coin_5":1}', 'postgres-test') into payout;
+  if payout <> 45 then raise exception 'voucher payout not committed'; end if;
+  select redeem_change_voucher_cash('PGTE-STVO-UC', 'a0000000-0000-4000-8000-000000000003', 45, '{"bill_20":2,"coin_5":1}', 'postgres-test') into payout;
+  if payout <> 0 then raise exception 'voucher payout replay duplicated'; end if;
+  if (select status from change_vouchers where code = 'PGTE-STVO-UC') <> 'REDEEMED' then raise exception 'voucher not redeemed'; end if;
+  if (select count from cash_register where denomination = 'bill_20') <> 0 then raise exception 'payout drawer incorrect'; end if;
+  if (select count(*) from cash_transactions where type = 'voucher_payout') <> 1 then raise exception 'payout ledger not exactly once'; end if;
+  begin
+    perform apply_change_voucher_to_order('PGTE-STVO-UC', 'pg-voucher-use', 'a0000000-0000-4000-8000-000000000004', 5);
+    raise exception 'redeemed voucher was reused';
+  exception when raise_exception then
+    if SQLERRM <> 'voucher_not_active' then raise; end if;
+  end;
+end $$;
 rollback;
