@@ -109,7 +109,11 @@ android {
 
     testOptions {
         unitTests.isIncludeAndroidResources = true
-        unitTests.all { it.systemProperty("robolectric.logging.enabled", "true") }
+        unitTests.all {
+            it.systemProperty("robolectric.logging.enabled", "true")
+            // Robolectric downloads android-all at test time; Google's Maven Central mirror is steadier on CI.
+            it.systemProperty("robolectric.dependency.repo.url", "https://maven-central.storage-download.googleapis.com/maven2")
+        }
     }
 
     lint {

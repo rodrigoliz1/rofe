@@ -5,7 +5,6 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
-import androidx.test.espresso.Espresso.pressBackUnconditionally
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.UiDevice
@@ -34,8 +33,10 @@ class KioskInstrumentedTest {
     }
 
     @Test fun backDoesNotLeave() {
+        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            repeat(3) { pressBackUnconditionally() }
+            // The real system Back key (also what the edge-swipe gesture sends).
+            repeat(3) { device.pressBack(); device.waitForIdle() }
             InstrumentationRegistry.getInstrumentation().waitForIdleSync()
             assertEquals(Lifecycle.State.RESUMED, scenario.state)
         }
