@@ -14,3 +14,5 @@ dependencyResolutionManagement {
 }
 rootProject.name = "rofe-kiosk"
 include(":app")
+
+include(":barista")

@@ -196,8 +196,10 @@ class AdminMenu(
             if (temporary) { prefs.temporaryExitUntil = 0; host.onKioskModeChanged() }
         }
         action(activity.getString(R.string.admin_reload)) { host.reloadKiosk() }
-        action(activity.getString(R.string.admin_new_customer)) { host.resetCustomerSession() }
-        action(activity.getString(R.string.admin_staff_access)) { host.openStaffAccess() }
+        if (!BuildConfig.BARISTA_MODE) {
+            action(activity.getString(R.string.admin_new_customer)) { host.resetCustomerSession() }
+            action(activity.getString(R.string.admin_staff_access)) { host.openStaffAccess() }
+        }
         action(activity.getString(R.string.admin_wifi)) {
             openSettings(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) Settings.Panel.ACTION_WIFI else Settings.ACTION_WIFI_SETTINGS)
         }

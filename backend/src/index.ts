@@ -311,6 +311,8 @@ const reconcilePendingPickupThrottled = () => Date.now() - lastSweepAt >= 60_000
 // --- API Routes ---
 
 // Get active orders (Barista View)
+app.get('/api/barista/session', requireAuth, requireRole('ADMIN', 'MANAGER', 'BARISTA'), (req, res) => { res.json({ role: req.principal!.role, station: 'barista' }); });
+
 app.get('/api/orders', requireAuth, requireRole('ADMIN', 'MANAGER', 'BARISTA'), async (_req, res) => {
   try {
     const orders = await db.getOrders();
@@ -368,6 +370,7 @@ app.post('/api/orders', requireAuth, requireRole('POS_DEVICE'), async (req, res,
       folio,
       operationId: input.operationId,
       deviceId: req.principal!.deviceId,
+      entrypoint: input.source ?? 'POS',
       customerName: input.customerName || 'Cliente',
       items: pricing.items,
       subtotal: pricing.subtotal,
@@ -530,6 +533,7 @@ app.post('/api/orders/sync', requireAuth, requireRole('POS_DEVICE'), async (req,
         folio: `R-${operation.operationId.replaceAll('-', '').slice(0, 10).toUpperCase()}`,
         operationId: operation.operationId,
         deviceId: req.principal!.deviceId,
+        entrypoint: operation.payload.source ?? 'POS',
         customerName: operation.payload.customerName || 'Cliente',
         items: pricing.items,
         subtotal: pricing.subtotal,

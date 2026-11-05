@@ -64,7 +64,7 @@ export function useCheckout(cartItems: CartItem[], total: number, orders: Order[
     const next = { ...draft, paymentMethod: method, submitted: true };
     try {
       saveCheckout(next); setDraft(next);
-      const payload = { operationId: next.operationId, customerName: next.customerName.trim(), items: next.cartItems.map((item) => ({ productId: item.product.id, quantity: item.quantity, customization: item.customization, selectedCustomVariants: item.selectedCustomVariants, quantitySelections: item.quantitySelections })), expectedSubtotal: next.cartItems.reduce((sum, item) => sum + item.totalPrice, 0), paymentMethod: method, discountAuthorizationToken: discountToken || undefined, voucherCode: next.voucher?.code };
+      const payload = { operationId: next.operationId, source: window.location.pathname.startsWith('/kiosk') ? 'KIOSK' : 'POS', customerName: next.customerName.trim(), items: next.cartItems.map((item) => ({ productId: item.product.id, quantity: item.quantity, customization: item.customization, selectedCustomVariants: item.selectedCustomVariants, quantitySelections: item.quantitySelections })), expectedSubtotal: next.cartItems.reduce((sum, item) => sum + item.totalPrice, 0), paymentMethod: method, discountAuthorizationToken: discountToken || undefined, voucherCode: next.voucher?.code };
       let result: { order: Order; mode: string };
       try {
         result = await apiJson('/api/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });

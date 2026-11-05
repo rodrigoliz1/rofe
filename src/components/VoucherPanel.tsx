@@ -4,6 +4,7 @@ import { calculateOptimalChange, DENOM_VALUES } from '../utils/cash';
 import { createOperationId } from '../utils/id';
 import type { ChangeVoucher } from './CashPaymentPanel';
 import '../styles/cash-panel.css';
+import { useBackHandler } from '../kiosk/backStack';
 import { voucherCodeFromScan } from '../utils/voucher';
 
 const money = (value: number) => `$${value.toFixed(2)}`;
@@ -21,6 +22,7 @@ export function VoucherPanel({ cashInventory, onCashChanged }: { cashInventory: 
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [scanning, setScanning] = useState(false);
+  useBackHandler(scanning, () => { setScanning(false); return true; });
   const operation = useRef(createOperationId());
 
   const lookup = async (raw: string) => {
@@ -91,9 +93,11 @@ function QrScanner({ onCode, onError }: { onCode: (value: string) => void; onErr
     void (async () => {
       try {
         if (!navigator.mediaDevices?.getUserMedia) throw new Error('unsupported');
-        const [{ default: jsQR }, media] = await Promise.all([import('jsqr'), navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })]);
+        const { default: jsQR } = await import('jsqr');
+        if (stopped) return;
+        const media = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
         stream = media;
-        if (stopped || !video.current) return;
+        if (stopped || !video.current) { media.getTracks().forEach(track => track.stop()); return; }
         video.current.srcObject = media;
         await video.current.play();
         const tick = () => {
@@ -109,10 +113,16 @@ function QrScanner({ onCode, onError }: { onCode: (value: string) => void; onErr
         };
         frame = requestAnimationFrame(tick);
       } catch {
+        stream?.getTracks().forEach(track => track.stop());
         if (!stopped) onError('No pudimos abrir la cámara. Escribe el código del cupón.');
       }
     })();
-    return () => { stopped = true; cancelAnimationFrame(frame); stream?.getTracks().forEach((track) => track.stop()); };
+    const pause = () => { if (document.visibilityState === 'hidden' || eventNativePause) { stop(); onError('Escaneo pausado. Vuelve a abrir la cámara para continuar.'); } };
+    let eventNativePause = false;
+    const nativePause = () => { eventNativePause = true; pause(); };
+    const stop = () => { stopped = true; cancelAnimationFrame(frame); stream?.getTracks().forEach(track => track.stop()); };
+    document.addEventListener('visibilitychange', pause); window.addEventListener('rofe:native-pause', nativePause);
+    return () => { stop(); document.removeEventListener('visibilitychange', pause); window.removeEventListener('rofe:native-pause', nativePause); };
     // Callbacks are stable for the lifetime of a scan.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

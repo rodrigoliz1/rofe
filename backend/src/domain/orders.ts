@@ -25,6 +25,7 @@ export const orderItemInputSchema = z.object({
 
 export const createOrderSchema = z.object({
   operationId: z.string().uuid(),
+  source: z.enum(['POS', 'KIOSK']).optional(),
   customerName: z.string().trim().min(1).max(80).optional(),
   items: z.array(orderItemInputSchema).min(1).max(50),
   paymentMethod: z.enum(['card', 'cash']),

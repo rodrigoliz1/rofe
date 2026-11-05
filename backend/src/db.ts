@@ -243,6 +243,7 @@ export interface DbOrder {
   operationId?: string;
   deviceId?: string;
   channel?: 'POS' | 'QR_PICKUP';
+  entrypoint?: 'POS' | 'KIOSK';
   paymentProvider?: 'MERCADO_PAGO' | 'STRIPE';
   pickup?: {
     accessTokenHash: string;

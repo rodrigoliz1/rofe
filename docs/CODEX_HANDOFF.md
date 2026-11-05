@@ -135,7 +135,7 @@ Pruebas clave de cupones: `backend/tests/vouchers.test.ts`, `e2e/cash-vouchers.s
 - No afirmar que algo está listo para producción, ni probado físicamente, si solo se usaron emuladores o si quedan pruebas pendientes.
 - No afirmar que hay imágenes generadas si no hubo generación real.
 
-## 6. Riesgos conocidos
+## 6. Riesgos conocidos (estado histórico previo a la ejecución de desarrollo)
 
 1. **Migración 008 aplicada**: pendiente resuelto. La función remota de versión devuelve 8; aún falta validar los recorridos reales de cupones y reembolsos con autorización.
 2. Los cupones no caducan y su tratamiento fiscal no está definido; lo debe decidir el contador.
@@ -146,7 +146,7 @@ Pruebas clave de cupones: `backend/tests/vouchers.test.ts`, `e2e/cash-vouchers.s
 7. La APK release sale sin firmar mientras no existan los secretos de keystore. Nada se ha probado en una M10 física; solo emuladores y Playwright.
 8. Las fotos `interim` y `pending` siguen esperando la colección definitiva.
 
-## 7. Tareas pendientes, en orden sugerido
+## 7. Tareas pendientes históricas, en orden sugerido
 
 1. Abrir un PR con los commits de documentación que siguen en esta rama, cuando el dueño lo pida.
 2. **Resuelto:** el dueño aplicó `backend/migrations/008_voucher_ledger.sql`; versión remota 8 comprobada por lectura. La validación operativa de producción (`/ready`, consulta autenticada e importes reales) sigue pendiente; no aplicar otra vez la migración.
@@ -159,3 +159,15 @@ Pruebas clave de cupones: `backend/tests/vouchers.test.ts`, `e2e/cash-vouchers.s
    - Rate limiting global (por ejemplo, en Supabase).
    - Una prueba E2E con cámara simulada.
    - Corregir las 2 advertencias `any` del lint del backend.
+
+## 8. Ejecución de desarrollo local — actualización del 5 de noviembre
+
+Rama `codex/rofe-development`. Caja: apertura idempotente y flujo sobre copia exacta verificados; el request ID histórico no está disponible y su 500 no se atribuye sin evidencia. Ver [CASH_SESSION_FIX.md](CASH_SESSION_FIX.md).
+
+Las doce fotos definitivas se generaron realmente, revisaron e importaron: manifiesto completo `approved`, variantes WebP y precarga comprobada. Ver [PHOTO_COLLECTION_DELIVERY.md](PHOTO_COLLECTION_DELIVERY.md). El punto de fotografías pendientes anterior queda resuelto.
+
+Recetas y personalizaciones administrativas integradas a cotización, unidades, precio, preparación e inventario. El dueño delegó cantidades iniciales: azúcar 2/4/8 g y Splenda 0–2 sobres sin recargo, editables. Se aplicaron sólo al catálogo local con backup; azúcar/Splenda conservan stock cero hasta registrar existencias reales. No se cambiaron datos remotos. Ver [PERSONALIZATION.md](PERSONALIZATION.md).
+
+La segunda app comparte código con Kiosco, entra por `/barista` con autenticación de personal y conserva permisos de cámara exclusivos para escaneo. Identidad, firma, icono y workflow separados; guía [Android Barista](../android-kiosk/BARISTA.md). No se debe confundir una APK compilada o una prueba de navegador con validación física en M10.
+
+Migración 008 sigue aplicada, sin ejecutarla de nuevo. Permanecen pruebas financieras reales autorizadas, firma release, comprobación física de las tablets, política fiscal de cupones y 10 alertas moderadas de tooling ESLint/minimatch (producción npm sin alertas). El dueño autorizó push/merge/despliegue condicionado a concluir correctamente; no presentar estos pendientes como «perfecto».

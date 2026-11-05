@@ -38,6 +38,9 @@ android {
 
     defaultConfig {
         applicationId = "com.rofe.kiosk"
+        buildConfigField("boolean", "BARISTA_MODE", "false")
+        buildConfigField("boolean", "CAMERA_ENABLED", "false")
+        buildConfigField("boolean", "AUTO_START_DEFAULT", "true")
         minSdk = 26
         targetSdk = 35
         versionCode = setting("rofe.versionCode", "1").toInt()

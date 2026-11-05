@@ -87,7 +87,8 @@ export class SupabaseDbAdapter implements DbAdapter {
       device_id: order.deviceId || null,
       channel: order.channel || 'POS',
       payment_provider: order.paymentProvider || (order.paymentMethod === 'card' ? 'MERCADO_PAGO' : null),
-      pickup: order.pickup || null,
+      // Reuse the existing JSON channel metadata column; no production schema change.
+      pickup: order.pickup ?? (order.entrypoint ? { entrypoint: order.entrypoint } : null),
       barista_id: order.baristaId || null,
       customer_name: order.customerName,
       items: order.items,
@@ -607,11 +608,11 @@ function mapCashSession(row: Record<string, unknown>): DbCashSession {
 
 // Supabase's dynamic schema returns untyped rows; conversion stays at this boundary.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapVoucher(row: Record<string, any>): DbChangeVoucher {
   return { id: String(row.id), code: String(row.code), orderId: row.order_id ?? undefined, amount: Number(row.amount), balance: Number(row.balance), status: row.status, createdBy: row.created_by ?? undefined, createdAt: String(row.created_at), updatedAt: String(row.updated_at), cancelledReason: row.cancelled_reason ?? undefined, cancelledBy: row.cancelled_by ?? undefined, cancelledAt: row.cancelled_at ?? undefined };
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapOrder(row: Record<string, any>): DbOrder { return {
       id: row.id,
       folio: row.folio || row.id,
@@ -619,7 +620,8 @@ function mapOrder(row: Record<string, any>): DbOrder { return {
       deviceId: row.device_id || undefined,
       channel: row.channel || 'POS',
       paymentProvider: row.payment_provider || undefined,
-      pickup: row.pickup || undefined,
+      pickup: row.channel === 'QR_PICKUP' ? row.pickup || undefined : undefined,
+      entrypoint: row.pickup?.entrypoint === 'KIOSK' ? 'KIOSK' : 'POS',
       baristaId: row.barista_id || undefined,
       customerName: row.customer_name,
       items: row.items, // already jsonb

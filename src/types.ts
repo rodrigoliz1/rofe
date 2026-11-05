@@ -69,6 +69,7 @@ export interface Order {
   operationId?: string;
   deviceId?: string;
   channel?: 'POS' | 'QR_PICKUP';
+  entrypoint?: 'POS' | 'KIOSK';
   paymentProvider?: 'MERCADO_PAGO' | 'STRIPE';
   pickup?: { standId: string; locationName: string; locationAddress: string };
   items: CartItem[];

@@ -1,52 +1,38 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import type { CartItem, Order, OrderStatus } from '../types';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { CashPaymentPanel } from './CashPaymentPanel';
 import { orderAmountDue } from '../utils/cash';
 import { VoucherPanel } from './VoucherPanel';
-import { apiFetch } from '../services/api';
+import { apiFetch, apiUrl, getPrincipal } from '../services/api';
+import { useBackHandler } from '../kiosk/backStack';
+import { enableBaristaAudio, playBaristaAlert, unannouncedOrders, loadAlertLedger, saveAlertLedger } from '../services/baristaAlerts';
 
 interface BaristaViewProps {
   orders: Order[];
   onUpdateOrderStatus: (orderId: string, newStatus: OrderStatus) => Promise<void>;
   onClearOrders?: () => void;
   onClose: () => void;
+  dedicated?: boolean;
+  soundReady?: boolean;
 }
 
 
-const playNewOrderSound = () => {
-  try {
-    const AudioContext = window.AudioContext || (window as Window & { webkitAudioContext?: typeof window.AudioContext }).webkitAudioContext;
-    if (!AudioContext) return;
-    const ctx = new AudioContext();
-    const now = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(587.33, now);
-    osc.frequency.exponentialRampToValueAtTime(880.00, now + 0.15);
-    gain.gain.setValueAtTime(0.08, now);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + 0.4);
-  } catch { /* Audio feedback is optional on restricted browsers. */ }
-};
-
 function OrderCustomer({ order }: { order: Order }) {
-  return <><div className="order-client-name">{order.customerName}{order.channel === 'QR_PICKUP' && <span className="pickup-channel-badge">Pickup · QR</span>}</div>
+  return <><div className="order-client-name">{order.customerName}{<span className="pickup-channel-badge">{order.channel === 'QR_PICKUP' ? 'Pickup · QR' : order.entrypoint === 'KIOSK' ? 'Kiosco' : 'POS'}</span>}</div>
     {order.channel === 'QR_PICKUP' && <p className="pickup-order-stand">Stand: {order.pickup?.standId ?? 'principal'}</p>}
     {order.notes && <p className="order-prep-note"><strong>Nota para barra:</strong> {order.notes}</p>}
   </>;
 }
 
-export const BaristaView: React.FC<BaristaViewProps> = ({ orders, onUpdateOrderStatus, onClearOrders, onClose }) => {
+export const BaristaView: React.FC<BaristaViewProps> = ({ orders, onUpdateOrderStatus, onClearOrders, onClose, dedicated = false, soundReady = true }) => {
   const actions = useAsyncAction();
+  const [clock, setClock] = useState(() => Date.now());
   const [activeTab, setActiveTab] = useState<'queue' | 'history' | 'vouchers'>('queue');
   const [elapsedTimes, setElapsedTimes] = useState<Record<string, string>>({});
   const [orderAges, setOrderAges] = useState<Record<string, { className: string; label: string }>>({});
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  useBackHandler(Boolean(selectedOrder), () => { setSelectedOrder(null); return true; });
   const [cashInventory, setCashInventory] = useState<Record<string, number>>({});
   const [cashError, setCashError] = useState('');
   const [undoReady, setUndoReady] = useState<{ orderId: string; folio: string } | null>(null);
@@ -58,13 +44,19 @@ export const BaristaView: React.FC<BaristaViewProps> = ({ orders, onUpdateOrderS
     } catch { setCashError('No pudimos consultar las denominaciones disponibles.'); }
   };
 
-  const activeOrdersCount = orders.filter(
-    (o) => o.status === 'PAID' || (o.status === 'PENDING_PAYMENT' && o.paymentMethod === 'cash')
-  ).length;
-
+  const ledgerKey = `rofe.barista.alerts:${apiUrl('')}:${getPrincipal()?.subjectId ?? 'staff'}`;
+  const announced = useRef(loadAlertLedger(ledgerKey));
+  const [audioReady, setAudioReady] = useState(false);
+  const [highlighted, setHighlighted] = useState<Set<string>>(new Set());
+  useEffect(() => { if (soundReady) void enableBaristaAudio().then(setAudioReady); }, [soundReady]);
   useEffect(() => {
-    if (activeOrdersCount > 0) playNewOrderSound();
-  }, [activeOrdersCount]);
+    const ids = unannouncedOrders(orders, announced.current);
+    if (!ids.length) return;
+    setHighlighted(current => new Set([...current, ...ids].slice(-2000)));
+    if (!audioReady || !playBaristaAlert()) return;
+    ids.forEach(id => announced.current.add(id)); saveAlertLedger(ledgerKey, announced.current);
+    window.dispatchEvent(new CustomEvent('rofe:barista-alert', { detail: { orderIds: ids } }));
+  }, [orders, audioReady, ledgerKey]);
 
   useEffect(() => {
     if ((selectedOrder && selectedOrder.status === 'PENDING_PAYMENT' && selectedOrder.paymentMethod === 'cash') || activeTab === 'vouchers') {
@@ -75,6 +67,7 @@ export const BaristaView: React.FC<BaristaViewProps> = ({ orders, onUpdateOrderS
   useEffect(() => {
     const updateTimes = () => {
       const now = Date.now();
+      setClock(now);
       const times: Record<string, string> = {};
       const ages: Record<string, { className: string; label: string }> = {};
       orders.forEach((order) => {
@@ -142,11 +135,11 @@ export const BaristaView: React.FC<BaristaViewProps> = ({ orders, onUpdateOrderS
   const readyOrders = queueOrders.filter((o) => o.status === 'READY');
 
   return (
-    <div className="barista-view" id="main-content">
+    <div className={`barista-view${dedicated ? ' barista-dedicated' : ''}`} id="main-content">
       {actions.error && <p className="inline-feedback error" role="alert">{actions.error}</p>}
       <header className="barista-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)' }}>
-          <h1 className="barista-title">Barista</h1>
+          <h1 className="barista-title">{dedicated ? 'Pedidos' : 'Barista'}</h1>
           <div className="barista-tabs">
             <button className={`barista-tab${activeTab === 'queue' ? ' active' : ''}`} onClick={() => setActiveTab('queue')}>
               Cola ({queueOrders.length + cashOrders.length})
@@ -159,7 +152,7 @@ export const BaristaView: React.FC<BaristaViewProps> = ({ orders, onUpdateOrderS
             </button>
           </div>
         </div>
-        <button className="barista-close" onClick={onClose}>Salir</button>
+        {!dedicated && <div className="barista-nav">{!audioReady && <button className="barista-close" onClick={() => void enableBaristaAudio().then(setAudioReady)}>Activar sonido</button>}<button className="barista-close" onClick={onClose}>Salir</button></div>}
       </header>
 
       {activeTab === 'vouchers' ? (
@@ -176,7 +169,7 @@ export const BaristaView: React.FC<BaristaViewProps> = ({ orders, onUpdateOrderS
               {cashOrders.map((order) => {
                 const age = ageState(order);
                 return (
-                  <div key={order.folio || order.id} className={`barista-order-card border-status-received ${age.className}`} onClick={() => setSelectedOrder(order)}>
+                  <div key={order.folio || order.id} data-new-order={highlighted.has(order.id) && clock - Date.parse(order.createdAt) < 90_000 ? 'true' : undefined} className={`barista-order-card border-status-received ${age.className}`} onClick={() => setSelectedOrder(order)}>
                     <div className="order-card-header">
                       <span className="order-number-tag">{order.folio || order.id}</span>
                       <span className="time-tag">{elapsedTimes[order.id]} · {age.label}</span>
@@ -188,7 +181,7 @@ export const BaristaView: React.FC<BaristaViewProps> = ({ orders, onUpdateOrderS
                           <span className="item-qty">{item.quantity}x</span>
                           <div className="item-details">
                             <span className="item-name">{item.product.name}</span>
-                            <span className="item-custom">{getCustomizationSummary(item)}</span>
+                            <span className="item-custom">{getCustomizationSummary(item)}</span>{item.ingredientInstructions?.length ? <span className="item-recipe">{item.ingredientInstructions.join(' · ')}</span> : null}
                           </div>
                         </div>
                       ))}
@@ -210,7 +203,7 @@ export const BaristaView: React.FC<BaristaViewProps> = ({ orders, onUpdateOrderS
               {receivedOrders.map((order) => {
                 const age = ageState(order);
                 return (
-                  <div key={order.folio || order.id} className={`barista-order-card border-status-received ${age.className}`} onClick={() => setSelectedOrder(order)}>
+                  <div key={order.folio || order.id} data-new-order={highlighted.has(order.id) && clock - Date.parse(order.createdAt) < 90_000 ? 'true' : undefined} className={`barista-order-card border-status-received ${age.className}`} onClick={() => setSelectedOrder(order)}>
                     <div className="order-card-header">
                       <span className="order-number-tag">{order.folio || order.id}</span>
                       <span className="time-tag">{elapsedTimes[order.id]} · {age.label}</span>
@@ -222,7 +215,7 @@ export const BaristaView: React.FC<BaristaViewProps> = ({ orders, onUpdateOrderS
                           <span className="item-qty">{item.quantity}x</span>
                           <div className="item-details">
                             <span className="item-name">{item.product.name}</span>
-                            <span className="item-custom">{getCustomizationSummary(item)}</span>
+                            <span className="item-custom">{getCustomizationSummary(item)}</span>{item.ingredientInstructions?.length ? <span className="item-recipe">{item.ingredientInstructions.join(' · ')}</span> : null}
                           </div>
                         </div>
                       ))}
@@ -248,7 +241,7 @@ export const BaristaView: React.FC<BaristaViewProps> = ({ orders, onUpdateOrderS
               {preparingOrders.map((order) => {
                 const age = ageState(order);
                 return (
-                  <div key={order.folio || order.id} className={`barista-order-card border-status-preparing ${age.className}`} onClick={() => setSelectedOrder(order)}>
+                  <div key={order.folio || order.id} data-new-order={highlighted.has(order.id) && clock - Date.parse(order.createdAt) < 90_000 ? 'true' : undefined} className={`barista-order-card border-status-preparing ${age.className}`} onClick={() => setSelectedOrder(order)}>
                     <div className="order-card-header">
                       <span className="order-number-tag">{order.folio || order.id}</span>
                       <span className="time-tag">{elapsedTimes[order.id]} · {age.label}</span>
@@ -260,7 +253,7 @@ export const BaristaView: React.FC<BaristaViewProps> = ({ orders, onUpdateOrderS
                           <span className="item-qty">{item.quantity}x</span>
                           <div className="item-details">
                             <span className="item-name">{item.product.name}</span>
-                            <span className="item-custom">{getCustomizationSummary(item)}</span>
+                            <span className="item-custom">{getCustomizationSummary(item)}</span>{item.ingredientInstructions?.length ? <span className="item-recipe">{item.ingredientInstructions.join(' · ')}</span> : null}
                           </div>
                         </div>
                       ))}
@@ -286,7 +279,7 @@ export const BaristaView: React.FC<BaristaViewProps> = ({ orders, onUpdateOrderS
               {readyOrders.map((order) => {
                 const age = ageState(order);
                 return (
-                  <div key={order.folio || order.id} className={`barista-order-card border-status-ready ${age.className}`} onClick={() => setSelectedOrder(order)}>
+                  <div key={order.folio || order.id} data-new-order={highlighted.has(order.id) && clock - Date.parse(order.createdAt) < 90_000 ? 'true' : undefined} className={`barista-order-card border-status-ready ${age.className}`} onClick={() => setSelectedOrder(order)}>
                     <div className="order-card-header">
                       <span className="order-number-tag">{order.folio || order.id}</span>
                       <span className="time-tag">{elapsedTimes[order.id]} · {age.label}</span>
@@ -298,7 +291,7 @@ export const BaristaView: React.FC<BaristaViewProps> = ({ orders, onUpdateOrderS
                           <span className="item-qty">{item.quantity}x</span>
                           <div className="item-details">
                             <span className="item-name">{item.product.name}</span>
-                            <span className="item-custom">{getCustomizationSummary(item)}</span>
+                            <span className="item-custom">{getCustomizationSummary(item)}</span>{item.ingredientInstructions?.length ? <span className="item-recipe">{item.ingredientInstructions.join(' · ')}</span> : null}
                           </div>
                         </div>
                       ))}
