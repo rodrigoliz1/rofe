@@ -1,5 +1,9 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.net.URI
+import java.security.SecureRandom
+import java.util.Base64
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.PBEKeySpec
 
 plugins {
     alias(libs.plugins.android.application)
@@ -152,11 +156,11 @@ tasks.register("hashPin") {
         val value = pin.orNull ?: error("Indica el PIN: ./gradlew :app:hashPin -Ppin=123456")
         require(value.length in 6..12 && value.all(Char::isDigit)) { "El PIN debe tener entre 6 y 12 dígitos." }
         val iterations = 120_000
-        val salt = ByteArray(16).also { java.security.SecureRandom().nextBytes(it) }
-        val spec = javax.crypto.spec.PBEKeySpec(value.toCharArray(), salt, iterations, 256)
-        val hash = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
+        val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }
+        val spec = PBEKeySpec(value.toCharArray(), salt, iterations, 256)
+        val hash = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
         spec.clearPassword()
-        val encoder = java.util.Base64.getEncoder()
+        val encoder = Base64.getEncoder()
         println("rofe.adminPinHash=$iterations:${encoder.encodeToString(salt)}:${encoder.encodeToString(hash)}")
     }
 }
