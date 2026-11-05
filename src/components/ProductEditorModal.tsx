@@ -1,4 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import { apiUrl } from '../services/api';
+import { useDialogFocus } from '../hooks/useDialogFocus';
 import type { Product, CustomVariantGroup } from '../types';
 
 interface RawInventoryItem {
@@ -12,17 +14,20 @@ interface RawInventoryItem {
 interface ProductEditorModalProps {
   product?: Product;
   rawInventory: RawInventoryItem[];
-  onSave: (p: Product, imgFile?: File) => void;
+  onSave: (p: Product, imgFile?: File) => Promise<void>;
   onClose: () => void;
-  onDelete?: (id: string) => void;
+  onDelete?: (id: string) => Promise<void>;
 }
 
 export const ProductEditorModal: React.FC<ProductEditorModalProps> = ({ product, rawInventory, onSave, onClose, onDelete }) => {
+  const dialogRef = useDialogFocus(onClose);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
   const [name, setName] = useState(product?.name || '');
   const [description, setDescription] = useState(product?.description || '');
   const [price, setPrice] = useState(product?.price || 0);
   const [category, setCategory] = useState<'coffee' | 'cold' | 'bakery'>(product?.category || 'coffee');
-  const [icon, setIcon] = useState(product?.icon || '☕️');
+  const [icon, setIcon] = useState(product?.icon || 'espresso');
   const [customizable, setCustomizable] = useState(product ? product.customizable : true);
   
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -33,9 +38,13 @@ export const ProductEditorModal: React.FC<ProductEditorModalProps> = ({ product,
   const [recipe, setRecipe] = useState<Record<string, number>>(product?.recipe || {});
   const [customVariants, setCustomVariants] = useState<CustomVariantGroup[]>(product?.custom_variants || []);
 
+  useEffect(() => () => { if (imagePreview.startsWith('blob:')) URL.revokeObjectURL(imagePreview); }, [imagePreview]);
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 1_000_000) { setError('Elige una imagen JPG, PNG o WebP de hasta 1 MB.'); return; }
+      setError('');
       setImageFile(file);
       setImagePreview(URL.createObjectURL(file));
     }
@@ -101,7 +110,10 @@ export const ProductEditorModal: React.FC<ProductEditorModalProps> = ({ product,
     setCustomVariants(newVariants);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (saving) return;
+    if (name.trim().length < 2 || !Number.isFinite(price) || price < 0) { setError('Escribe un nombre de al menos dos letras y un precio válido.'); return; }
+    setSaving(true); setError('');
     const newProduct: Product = {
       id: product?.id || Date.now().toString(),
       name,
@@ -114,35 +126,38 @@ export const ProductEditorModal: React.FC<ProductEditorModalProps> = ({ product,
       custom_variants: customVariants,
       image: product?.image
     };
-    onSave(newProduct, imageFile || undefined);
+    try { await onSave(newProduct, imageFile || undefined); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'No pudimos guardar el producto.'); }
+    finally { setSaving(false); }
   };
 
   return (
     <div className="barista-modal-backdrop" style={{ backdropFilter: 'blur(5px)', zIndex: 10000 }}>
-      <div className="barista-modal-dialog" style={{ maxWidth: 800, width: '90%', maxHeight: '90vh', overflowY: 'auto' }}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="product-editor-title" className="barista-modal-dialog" style={{ maxWidth: 800, width: '90%', maxHeight: '90vh', overflowY: 'auto' }}>
         <button className="barista-modal-close" onClick={onClose}>&times;</button>
-        <h2 style={{ marginBottom: 20 }}>{product ? 'Editar Producto' : 'Añadir Nuevo Producto'}</h2>
+        <h2 id="product-editor-title" style={{ marginBottom: 20 }}>{product ? 'Editar Producto' : 'Añadir Nuevo Producto'}</h2>
 
+        {error && <p className="inline-feedback error" role="alert">{error}</p>}
         <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
           <div style={{ flex: '1 1 300px' }}>
-            <label style={{ display: 'block', marginBottom: 5 }}>Nombre</label>
-            <input className="admin-input-text" style={{ width: '100%', marginBottom: 15 }} value={name} onChange={e => setName(e.target.value)} />
+            <label htmlFor="product-name" style={{ display: 'block', marginBottom: 5 }}>Nombre</label>
+            <input className="admin-input-text" style={{ width: '100%', marginBottom: 15 }} id="product-name" value={name} onChange={e => setName(e.target.value)} />
 
             <label style={{ display: 'block', marginBottom: 5 }}>Categoría</label>
-            <select className="admin-input-text" style={{ width: '100%', marginBottom: 15 }} value={category} onChange={e => setCategory(e.target.value as any)}>
+            <select className="admin-input-text" style={{ width: '100%', marginBottom: 15 }} value={category} onChange={e => setCategory(e.target.value as 'coffee' | 'cold' | 'bakery')}>
               <option value="coffee">Café</option>
               <option value="cold">Frío</option>
               <option value="bakery">Repostería</option>
             </select>
 
-            <label style={{ display: 'block', marginBottom: 5 }}>Precio Base ($)</label>
-            <input type="number" className="admin-input-text" style={{ width: '100%', marginBottom: 15 }} value={price} onChange={e => setPrice(parseFloat(e.target.value))} />
+            <label htmlFor="product-price" style={{ display: 'block', marginBottom: 5 }}>Precio Base ($)</label>
+            <input type="number" className="admin-input-text" style={{ width: '100%', marginBottom: 15 }} id="product-price" min="0" step="0.01" value={price} onChange={e => setPrice(parseFloat(e.target.value))} />
 
             <label style={{ display: 'block', marginBottom: 5 }}>Descripción</label>
             <textarea className="admin-input-text" style={{ width: '100%', marginBottom: 15, height: 80 }} value={description} onChange={e => setDescription(e.target.value)} />
             
-            <label style={{ display: 'block', marginBottom: 5 }}>Ícono (Emoji)</label>
-            <input className="admin-input-text" style={{ width: '100%', marginBottom: 15 }} value={icon} onChange={e => setIcon(e.target.value)} />
+            <label style={{ display: 'block', marginBottom: 5 }}>Ícono del menú</label>
+            <select aria-label="Ícono del menú" className="admin-input-text" value={icon} onChange={e => setIcon(e.target.value)}><option value="espresso">Espresso</option><option value="latte">Latte</option><option value="cold_brew">Bebida fría</option><option value="croissant">Croissant</option><option value="pain_choc">Panadería</option></select>
 
             <label style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 15, cursor: 'pointer' }}>
               <input type="checkbox" checked={customizable} onChange={e => setCustomizable(e.target.checked)} style={{ width: 20, height: 20 }} />
@@ -154,7 +169,7 @@ export const ProductEditorModal: React.FC<ProductEditorModalProps> = ({ product,
             <label style={{ display: 'block', marginBottom: 5 }}>Imagen del Producto</label>
             <div style={{ border: '2px dashed #444', borderRadius: 8, padding: 20, textAlign: 'center', marginBottom: 15, position: 'relative' }}>
               {imagePreview ? (
-                <img src={imagePreview} alt="Preview" style={{ maxWidth: '100%', maxHeight: 200, borderRadius: 8, objectFit: 'cover' }} />
+                <img src={imagePreview.startsWith('/api/') ? apiUrl(imagePreview) : imagePreview} alt="Preview" style={{ maxWidth: '100%', maxHeight: 200, borderRadius: 8, objectFit: 'cover' }} />
               ) : (
                 <div style={{ color: '#888', padding: '40px 0' }}>Sin Imagen</div>
               )}
@@ -245,14 +260,10 @@ export const ProductEditorModal: React.FC<ProductEditorModalProps> = ({ product,
 
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 20, paddingTop: 20, borderTop: '1px solid #444' }}>
           {product && onDelete ? (
-            <button className="action-btn-small delete" style={{ padding: '10px 20px' }} onClick={() => {
-              if (window.confirm('¿Estás seguro de eliminar este producto?')) {
-                onDelete(product.id);
-              }
-            }}>Remover Producto</button>
+            <button className="action-btn-small delete" style={{ padding: '10px 20px' }} disabled={saving} onClick={() => { setSaving(true); void onDelete(product.id).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : 'No pudimos eliminar el producto.')).finally(() => setSaving(false)); }}>Remover Producto</button>
           ) : <div></div>}
           
-          <button className="checkout-btn" style={{ padding: '10px 30px' }} onClick={handleSave}>Guardar Cambios</button>
+          <button className="checkout-btn" style={{ padding: '10px 30px' }} disabled={saving} onClick={() => void handleSave()}>{saving ? 'Guardando…' : 'Guardar Cambios'}</button>
         </div>
       </div>
     </div>

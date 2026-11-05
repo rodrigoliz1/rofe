@@ -1,5 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState } from 'react';
 import type { Product, CustomizationOptions, CartItem } from '../types';
+import { configuredItemId } from '../utils/cart';
+import { useDialogFocus } from '../hooks/useDialogFocus';
 import { ProductIcon } from './Icons';
 
 interface ProductModalProps {
@@ -21,6 +23,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   onClose,
   onAddToCart,
 }) => {
+  const dialogRef = useDialogFocus(onClose);
   const [customization, setCustomization] = useState<CustomizationOptions>({
     ...DEFAULT_CUSTOMIZATION,
     // Set default milk for milk-based coffees automatically
@@ -30,11 +33,9 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   });
 
   const [quantity, setQuantity] = useState(1);
-  const [totalPrice, setTotalPrice] = useState(product.price);
   const [selectedCustomVariants, setSelectedCustomVariants] = useState<Record<string, string>>({});
 
-  // Calculate pricing based on options selected
-  useEffect(() => {
+  const totalPrice = useMemo(() => {
     let base = product.price;
 
     // Custom Variants
@@ -61,8 +62,8 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       base += 15; // +$15 MXN for extra espresso shot
     }
 
-    setTotalPrice(base * quantity);
-  }, [customization, quantity, product.price]);
+    return base * quantity;
+  }, [customization, product.custom_variants, product.price, quantity, selectedCustomVariants]);
 
   const handleOptionChange = <K extends keyof CustomizationOptions>(
     key: K,
@@ -74,13 +75,12 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     }));
   };
 
-  const handleIncrement = () => setQuantity((prev) => prev + 1);
+  const handleIncrement = () => setQuantity((prev) => Math.min(50, prev + 1));
   const handleDecrement = () => setQuantity((prev) => (prev > 1 ? prev - 1 : 1));
 
   const handleAdd = () => {
     // Generate a unique ID based on product ID and customization options
-    const customizationString = JSON.stringify({ ...customization, selectedCustomVariants });
-    const uniqueId = `${product.id}-${btoa(customizationString).substring(0, 8)}`;
+    const uniqueId = configuredItemId(product.id, customization, selectedCustomVariants);
 
     const cartItem: CartItem = {
       id: uniqueId,
@@ -111,8 +111,8 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
-        <button className="modal-close-btn" onClick={onClose}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={`Personalizar ${product.name}`} className="modal-sheet" onClick={(e) => e.stopPropagation()}>
+        <button className="modal-close-btn" onClick={onClose} aria-label="Cerrar personalización">
           &times;
         </button>
 

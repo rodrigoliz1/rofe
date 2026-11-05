@@ -1,5 +1,6 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import type { DbAdapter, DbInventoryItem, DbCashRegister, DbCashTransaction, DbBakeryBatch, DbOrder } from './db';
+import type { DbPickupSettings } from './db';
+import type { DbAdapter, DbInventoryItem, DbCashTransaction, DbBakeryBatch, DbOrder, DbInventoryConsumption, DbSupplier, DbPurchase, DbWasteRecord, DbInventoryMovement, DbCashSession, DbDailyClosure, DbProductionBatch } from './db';
 
 export class SupabaseDbAdapter implements DbAdapter {
   private supabase: SupabaseClient;
@@ -9,151 +10,165 @@ export class SupabaseDbAdapter implements DbAdapter {
   }
 
   async initialize(): Promise<void> {
-    // Initialization/Migrations are handled manually via SQL script in Supabase
-    console.log('SupabaseDbAdapter: Initialize check (ping)...');
-    const { error } = await this.supabase.from('inventory').select('product_id').limit(1);
-    if (error) {
-      console.warn('Supabase initialization check failed. Ensure tables are created:', error.message);
-    } else {
-      console.log('Supabase connection successful.');
+    const version = await this.supabase.rpc('rofe_schema_version');
+    if (version.error && version.status === 0) throw new Error('No se pudo conectar con Supabase. Comprueba la conexión a internet y que el proyecto esté disponible.');
+    if (version.error || version.data !== 5) throw new Error('Aplica las migraciones de ROFÉ antes de iniciar el servidor (versión 5 requerida).');
+    const criticalTables = [
+      'products', 'orders', 'inventory', 'raw_inventory', 'cash_register', 'cash_transactions', 'cash_sessions',
+      'cash_movements', 'daily_closures', 'daily_closings', 'suppliers', 'purchases', 'purchase_items',
+      'inventory_movements', 'inventory_reservations', 'waste_records', 'production_batches', 'pickup_settings',
+    ] as const;
+    for (const table of criticalTables) {
+      const { error } = await this.supabase.from(table).select('*').limit(1);
+      if (error) throw new Error(`Supabase no está listo (${table}): ${error.message}`);
+    }
+    console.log('Supabase connection successful.');
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async readAll(table: string, select = '*'): Promise<Array<Record<string, any>>> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rows: Array<Record<string, any>> = [];
+    for (let offset = 0; ; offset += 500) {
+      const { data, error } = await this.supabase.from(table).select(select).order('id', { ascending: true }).range(offset, offset + 499);
+      if (error) throw error;
+      rows.push(...data);
+      if (data.length < 500) return rows;
     }
   }
 
   async getOrders(): Promise<DbOrder[]> {
-    const { data, error } = await this.supabase
-      .from('orders')
-      .select('*')
-      .order('created_at', { ascending: true });
+    const data = await this.readAll('orders');
 
-    if (error) throw error;
-
-    return data.map((row: any) => ({
-      id: row.id,
-      customerName: row.customer_name,
-      items: row.items, // already jsonb
-      total: Number(row.total),
-      status: row.status,
-      paymentMethod: row.payment_method,
-      paymentId: row.payment_id || undefined,
-      paymentIntentId: row.payment_intent_id || undefined,
-      createdAt: row.created_at,
-    }));
+    return data.map(mapOrder);
   }
 
-  async createOrder(order: DbOrder): Promise<void> {
+  async getOrderById(id: string): Promise<DbOrder | undefined> {
+    const { data, error } = await this.supabase.from('orders').select('*').eq('id', id).maybeSingle();
+    if (error) throw error;
+    return data ? mapOrder(data) : undefined;
+  }
+  async getOrderByOperationId(operationId: string): Promise<DbOrder | undefined> {
+    const { data, error } = await this.supabase.from('orders').select('*').eq('operation_id', operationId).maybeSingle();
+    if (error) throw error;
+    return data ? mapOrder(data) : undefined;
+  }
+
+  async getPendingPickupOrders(): Promise<DbOrder[]> {
+    const { data, error } = await this.supabase.from('orders').select('*').eq('channel', 'QR_PICKUP').eq('status', 'PENDING_PAYMENT').eq('payment_status', 'PENDING').order('created_at').limit(100);
+    if (error) throw error;
+    return data.map(mapOrder);
+  }
+
+  async getPickupSettings(): Promise<DbPickupSettings | undefined> {
+    const { data, error } = await this.supabase.from('pickup_settings').select('settings').eq('id', 1).maybeSingle();
+    if (error) throw error;
+    return data?.settings as DbPickupSettings | undefined;
+  }
+  async savePickupSettings(settings: DbPickupSettings): Promise<void> {
+    const { error } = await this.supabase.from('pickup_settings').upsert({ id: 1, settings });
+    if (error) throw error;
+  }
+
+  async createOrder(order: DbOrder): Promise<boolean> {
     const { error } = await this.supabase.from('orders').insert({
       id: order.id,
+      folio: order.folio || order.id,
+      operation_id: order.operationId || null,
+      device_id: order.deviceId || null,
+      channel: order.channel || 'POS',
+      payment_provider: order.paymentProvider || (order.paymentMethod === 'card' ? 'MERCADO_PAGO' : null),
+      pickup: order.pickup || null,
+      barista_id: order.baristaId || null,
       customer_name: order.customerName,
       items: order.items,
+      subtotal: order.subtotal ?? order.total,
+      discount: order.discount ?? 0,
+      discount_type: order.discountType || null,
+      discount_reason: order.discountReason || null,
+      discount_authorized_by: order.discountAuthorizedBy || null,
+      tax: order.tax ?? 0,
       total: order.total,
       status: order.status,
+      payment_status: order.paymentStatus || null,
       payment_method: order.paymentMethod,
       payment_id: order.paymentId || null,
       payment_intent_id: order.paymentIntentId || null,
-      created_at: new Date(order.createdAt).toISOString()
+      notes: order.notes || null,
+      created_at: new Date(order.createdAt).toISOString(),
+      updated_at: new Date(order.updatedAt || order.createdAt).toISOString()
     });
 
+    if (error?.code === '23505') return false;
     if (error) throw error;
-
-    // Decrement stock in database using recipes and raw_inventory
-    const { data: products } = await this.supabase.from('products').select('*');
-    const { data: rawInv } = await this.supabase.from('raw_inventory').select('*');
-
-    if (products && rawInv) {
-      const deductions: Record<string, number> = {};
-
-      for (const item of order.items) {
-        const p = products.find((prod: any) => prod.id === item.product.id);
-        if (!p) continue;
-        
-        let recipe = p.recipe || {};
-        
-        // Handle customizations modifying the recipe
-        if (item.customization) {
-          // Base recipe modifications depending on size, etc.
-          let multiplier = item.customization.size === 'grande' ? 1.5 : 1;
-          
-          const dynamicRecipe: Record<string, number> = { ...recipe };
-          
-          if (dynamicRecipe['coffee_beans']) {
-            dynamicRecipe['coffee_beans'] *= multiplier;
-          }
-          if (dynamicRecipe['matcha_powder']) {
-            dynamicRecipe['matcha_powder'] *= multiplier;
-          }
-          
-          if (dynamicRecipe['milk_whole'] && item.customization.milk !== 'whole') {
-             const amount = dynamicRecipe['milk_whole'] * multiplier;
-             delete dynamicRecipe['milk_whole'];
-             if (item.customization.milk === 'light') dynamicRecipe['milk_light'] = amount;
-             if (item.customization.milk === 'avena') dynamicRecipe['milk_avena'] = amount;
-             if (item.customization.milk === 'almendra') dynamicRecipe['milk_almendra'] = amount;
-          } else if (dynamicRecipe['milk_whole']) {
-             dynamicRecipe['milk_whole'] *= multiplier;
-          }
-          
-          if (item.customization.extraShot) {
-             dynamicRecipe['coffee_beans'] = (dynamicRecipe['coffee_beans'] || 0) + 25; // add 25g
-          }
-          
-          // Cups
-          if (p.category === 'coffee' || p.category === 'cold') {
-             const isCold = p.category === 'cold' || item.customization.temp === 'iced';
-             const cupKey = isCold 
-                ? (item.customization.size === 'grande' ? 'cup_cold_16oz' : 'cup_cold_12oz')
-                : (item.customization.size === 'grande' ? 'cup_hot_12oz' : 'cup_hot_8oz');
-             dynamicRecipe[cupKey] = 1;
-             
-             dynamicRecipe[isCold ? 'lid_cold' : 'lid_hot'] = 1;
-             if (isCold) dynamicRecipe['straw'] = 1;
-             if (!isCold) dynamicRecipe['sleeve'] = 1;
-          }
-          
-          if (item.customization.sweetness !== 'none') {
-             dynamicRecipe['splenda'] = item.customization.sweetness === 'extra' ? 2 : 1;
-          }
-
-          // Multiply by item quantity
-          for (const [ing, qty] of Object.entries(dynamicRecipe)) {
-             deductions[ing] = (deductions[ing] || 0) + (Number(qty) * item.quantity);
-          }
-        } else {
-          // No customizations (e.g. Bakery)
-          for (const [ing, qty] of Object.entries(recipe)) {
-             deductions[ing] = (deductions[ing] || 0) + (Number(qty) * item.quantity);
-          }
-        }
-      }
-
-      // Now apply deductions to raw_inventory
-      for (const [ing, qty] of Object.entries(deductions)) {
-         const current = rawInv.find((r: any) => r.id === ing);
-         if (current) {
-            await this.supabase.from('raw_inventory').update({ stock: Math.max(0, current.stock - qty) }).eq('id', ing);
-         }
-      }
-    }
+    return true;
   }
 
-  async updateOrderStatus(orderId: string, status: string, paymentId?: string): Promise<void> {
-    const payload: any = { status };
+  async updateOrderStatus(orderId: string, status: string, paymentId?: string, paymentStatus?: string, cancellationReason?: string): Promise<void> {
+    const payload: Record<string, string> = { status };
     if (paymentId) payload.payment_id = paymentId;
+    if (paymentStatus) payload.payment_status = paymentStatus;
+    if (cancellationReason) payload.cancellation_reason = cancellationReason;
+    payload.updated_at = new Date().toISOString();
 
-    const { error } = await this.supabase.from('orders').update(payload).eq('id', orderId);
+    let query = this.supabase.from('orders').update(payload).eq('id', orderId);
+    if (paymentStatus === 'REJECTED') query = query.eq('status', 'PENDING_PAYMENT').eq('payment_status', 'PENDING');
+    const { error } = await query;
     if (error) throw error;
   }
 
-  async clearOrders(): Promise<void> {
-    const { error } = await this.supabase.from('orders').delete().neq('id', 'placeholder_for_all'); 
-    // Supabase needs a filter to delete all, .neq is a hack to match everything
+  async reserveOrderInventory(orderId: string, consumption: DbInventoryConsumption[]): Promise<void> {
+    const { error } = await this.supabase.rpc('reserve_order_inventory', { p_order_id: orderId, p_consumption: consumption });
     if (error) throw error;
+  }
+
+  async attachPaymentIntent(orderId: string, paymentIntentId: string): Promise<void> {
+    const { error } = await this.supabase.from('orders').update({ payment_intent_id: paymentIntentId, updated_at: new Date().toISOString() })
+      .eq('id', orderId).or(`payment_intent_id.is.null,payment_intent_id.eq.${paymentIntentId}`);
+    if (error) throw error;
+  }
+
+  async confirmOrderPayment(orderId: string, paymentId: string, consumption: DbInventoryConsumption[]): Promise<boolean> {
+    const { data, error } = await this.supabase.rpc('confirm_order_payment', {
+      p_order_id: orderId,
+      p_payment_id: paymentId,
+      p_consumption: consumption,
+    });
+    if (error) throw error;
+    return Boolean(data);
+  }
+
+  async confirmCashOrderPayment(input: { orderId: string; paymentId: string; consumption: DbInventoryConsumption[]; receivedAmount: number; changeAmount: number; receivedDenominations: Record<string, number>; changeDenominations: Record<string, number> }): Promise<boolean> {
+    const { data, error } = await this.supabase.rpc('confirm_cash_payment', {
+      p_order_id: input.orderId,
+      p_payment_id: input.paymentId,
+      p_consumption: input.consumption,
+      p_received_amount: input.receivedAmount,
+      p_change_amount: input.changeAmount,
+      p_received_denominations: input.receivedDenominations,
+      p_change_denominations: input.changeDenominations,
+    });
+    if (error) throw error;
+    return Boolean(data);
+  }
+
+  async applyOrderRefund(input: { orderId: string; operationId: string; reason: string; userId: string; cashDenominations?: Record<string, number> }): Promise<boolean> {
+    const { data, error } = await this.supabase.rpc('apply_order_refund', {
+      p_order_id: input.orderId,
+      p_operation_id: input.operationId,
+      p_reason: input.reason,
+      p_user_id: input.userId,
+      p_cash_denominations: input.cashDenominations || {},
+    });
+    if (error) throw error;
+    return Boolean(data);
   }
 
   async getInventory(): Promise<DbInventoryItem[]> {
     const { data, error } = await this.supabase.from('inventory').select('*');
     if (error) throw error;
 
-    return data.map((row: any) => ({
+    return data.map((row) => ({
       product_id: row.product_id,
       stock: row.stock,
       cost: Number(row.cost),
@@ -172,18 +187,28 @@ export class SupabaseDbAdapter implements DbAdapter {
   async getRawInventory(): Promise<import('./db').DbRawInventory[]> {
     const { data, error } = await this.supabase.from('raw_inventory').select('*');
     if (error) throw error;
-    return data.map((row: any) => ({
+    return data.map((row) => ({
       id: row.id,
       name: row.name,
       unit: row.unit,
       stock: Number(row.stock),
       cost: Number(row.cost),
+      minStock: row.min_stock == null ? 0 : Number(row.min_stock),
+      reservedStock: Number(row.reserved_stock ?? 0),
     }));
   }
 
-  async updateRawInventory(id: string, stock: number, cost: number): Promise<void> {
-    const { error } = await this.supabase.from('raw_inventory').update({ stock, cost }).eq('id', id);
+  async adjustRawInventory(input: { id: string; stock: number; cost: number; reason: string; userId: string; operationId: string }): Promise<boolean> {
+    const { data, error } = await this.supabase.rpc('record_inventory_adjustment', {
+      p_ingredient_id: input.id,
+      p_stock: input.stock,
+      p_cost: input.cost,
+      p_reason: input.reason,
+      p_user_id: input.userId,
+      p_operation_id: input.operationId,
+    });
     if (error) throw error;
+    return Boolean(data);
   }
 
   async createRawInventoryItem(item: import('./db').DbRawInventory): Promise<void> {
@@ -200,7 +225,7 @@ export class SupabaseDbAdapter implements DbAdapter {
   async getProducts(): Promise<import('./db').DbProduct[]> {
     const { data, error } = await this.supabase.from('products').select('*');
     if (error) throw error;
-    return data.map((row: any) => ({
+    return data.map((row) => ({
       id: row.id,
       name: row.name,
       description: row.description,
@@ -229,7 +254,7 @@ export class SupabaseDbAdapter implements DbAdapter {
     if (error) throw error;
 
     const reg: Record<string, number> = {};
-    data.forEach((row: any) => {
+    data.forEach((row) => {
       reg[row.denomination] = row.count;
     });
     return reg;
@@ -256,32 +281,16 @@ export class SupabaseDbAdapter implements DbAdapter {
     });
   }
 
-  async addCashTransaction(transaction: DbCashTransaction): Promise<void> {
-    const { error } = await this.supabase.from('cash_transactions').insert({
-      type: transaction.type,
-      amount: transaction.amount,
-      description: transaction.description,
-      denominations: transaction.denominations,
-    });
+  async addCashTransaction(transaction: DbCashTransaction): Promise<boolean> {
+    const { data, error } = await this.supabase.rpc('record_cash_movement', { p_transaction: transaction });
     if (error) throw error;
-
-    // Update register counts
-    const multiplier = (transaction.type === 'change' || transaction.type === 'manual_expense' || transaction.type === 'manual_investment') ? -1 : 1;
-    for (const [denom, count] of Object.entries(transaction.denominations)) {
-      const { data: reg } = await this.supabase.from('cash_register').select('count').eq('denomination', denom).single();
-      if (reg) {
-        await this.supabase.from('cash_register').update({ count: Math.max(0, reg.count + (count * multiplier)) }).eq('denomination', denom);
-      } else {
-        await this.supabase.from('cash_register').insert({ denomination: denom, count: Math.max(0, count * multiplier) });
-      }
-    }
+    return Boolean(data);
   }
 
   async getTransactionLedger(): Promise<DbCashTransaction[]> {
-    const { data, error } = await this.supabase.from('cash_transactions').select('*').order('created_at', { ascending: false });
-    if (error) throw error;
+    const data = await this.readAll('cash_transactions');
 
-    return data.map((row: any) => ({
+    return data.map((row) => ({
       id: row.id,
       type: row.type,
       amount: Number(row.amount),
@@ -291,11 +300,14 @@ export class SupabaseDbAdapter implements DbAdapter {
       status: row.status,
       audit_reason: row.audit_reason,
       original_amount: row.original_amount ? Number(row.original_amount) : undefined,
+      operationId: row.operation_id || undefined,
+      createdBy: row.created_by || undefined,
+      cashSessionId: row.cash_session_id || undefined,
     }));
   }
 
   async updateCashTransaction(id: number, status: 'deleted' | 'modified', auditReason: string, newAmount?: number): Promise<void> {
-    const payload: any = { status, audit_reason: auditReason };
+    const payload: Record<string, string | number> = { status, audit_reason: auditReason };
     if (status === 'modified' && newAmount !== undefined) {
       // Fetch current to save original
       const { data: currentTx } = await this.supabase.from('cash_transactions').select('amount').eq('id', id).single();
@@ -313,7 +325,7 @@ export class SupabaseDbAdapter implements DbAdapter {
     const { data, error } = await this.supabase.from('bakery_batches').select('*').order('added_at', { ascending: true });
     if (error) throw error;
 
-    return data.map((row: any) => ({
+    return data.map((row) => ({
       id: row.id,
       product_id: row.product_id,
       quantity: row.quantity,
@@ -388,7 +400,7 @@ export class SupabaseDbAdapter implements DbAdapter {
 
   async uploadProductImage(fileName: string, buffer: Buffer, mimeType: string): Promise<string> {
     const path = `${Date.now()}_${fileName.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
-    const { data, error } = await this.supabase.storage
+    const { error } = await this.supabase.storage
       .from('product_images')
       .upload(path, buffer, { contentType: mimeType, upsert: true });
     
@@ -401,4 +413,135 @@ export class SupabaseDbAdapter implements DbAdapter {
     return publicData.publicUrl;
   }
 
+  async getSuppliers(): Promise<DbSupplier[]> {
+    const { data, error } = await this.supabase.from('suppliers').select('*').order('name');
+    if (error) throw error;
+    return data.map((row) => ({ id: row.id, name: row.name, contactName: row.contact_name || undefined, phone: row.phone || undefined, email: row.email || undefined, notes: row.notes || undefined, active: row.active, createdAt: row.created_at }));
+  }
+
+  async createSupplier(supplier: DbSupplier): Promise<void> {
+    const { error } = await this.supabase.from('suppliers').insert({ id: supplier.id, name: supplier.name, contact_name: supplier.contactName || null, phone: supplier.phone || null, email: supplier.email || null, notes: supplier.notes || null, active: supplier.active, created_at: supplier.createdAt });
+    if (error) throw error;
+  }
+
+  async getPurchases(): Promise<DbPurchase[]> {
+    const data = await this.readAll('purchases', '*,purchase_items(*)');
+    return data.map((row) => ({
+      id: row.id, supplierId: row.supplier_id || undefined, invoiceReference: row.invoice_reference || undefined,
+      paymentMethod: row.payment_method, total: Number(row.total), notes: row.notes || undefined,
+      purchasedAt: row.purchased_at, createdBy: row.created_by, operationId: row.operation_id,
+      items: (row.purchase_items || []).map((line: Record<string, unknown>) => ({ ingredientId: String(line.ingredient_id), quantity: Number(line.quantity), unit: String(line.unit), unitCost: Number(line.unit_cost), subtotal: Number(line.subtotal) })),
+    }));
+  }
+
+  async recordPurchase(purchase: DbPurchase): Promise<boolean> {
+    const { data, error } = await this.supabase.rpc('record_inventory_purchase', { p_purchase: purchase });
+    if (error) throw error;
+    return Boolean(data);
+  }
+
+  async getWasteRecords(): Promise<DbWasteRecord[]> {
+    const data = await this.readAll('waste_records');
+    return data.map((row) => ({ id: row.id, ingredientId: row.ingredient_id, quantity: Number(row.quantity), costSnapshot: Number(row.cost_snapshot), reason: row.reason, userId: row.user_id, operationId: row.operation_id, createdAt: row.created_at }));
+  }
+
+  async recordWaste(record: DbWasteRecord): Promise<boolean> {
+    const { data, error } = await this.supabase.rpc('record_inventory_waste', { p_waste: record });
+    if (error) throw error;
+    return Boolean(data);
+  }
+
+  async getInventoryMovements(): Promise<DbInventoryMovement[]> {
+    const data = await this.readAll('inventory_movements');
+    return data.map((row) => ({ id: row.id, ingredientId: row.ingredient_id, quantity: Number(row.quantity), movementType: row.movement_type, reason: row.reason || undefined, userId: row.user_id || undefined, deviceId: row.device_id || undefined, orderId: row.order_id || undefined, purchaseId: row.purchase_id || undefined, operationId: row.operation_id || undefined, unitCostSnapshot: Number(row.unit_cost_snapshot), createdAt: row.created_at }));
+  }
+
+  async getCashSessions(): Promise<DbCashSession[]> {
+    const data = await this.readAll('cash_sessions');
+    return data.map(mapCashSession);
+  }
+
+  async getOpenCashSession(): Promise<DbCashSession | undefined> {
+    const { data, error } = await this.supabase.from('cash_sessions').select('*').is('closed_at', null).maybeSingle();
+    if (error) throw error;
+    return data ? mapCashSession(data) : undefined;
+  }
+
+  async openCashSession(session: DbCashSession): Promise<boolean> {
+    const { data, error } = await this.supabase.rpc('open_cash_session', { p_session: session });
+    if (error) throw error;
+    return Boolean(data);
+  }
+
+  async closeCashSession(sessionId: string, close: Pick<DbCashSession, 'expectedCash' | 'countedCash' | 'difference' | 'closingDenominations' | 'closedBy' | 'closedAt'>): Promise<boolean> {
+    const { data, error } = await this.supabase.rpc('close_cash_session', { p_session_id: sessionId, p_close: close });
+    if (error) throw error;
+    return Boolean(data);
+  }
+
+  async closeCashSessionWithClosing(sessionId: string, close: Pick<DbCashSession, 'expectedCash' | 'countedCash' | 'difference' | 'closingDenominations' | 'closedBy' | 'closedAt'>, closure: DbDailyClosure): Promise<boolean> {
+    const { data, error } = await this.supabase.rpc('close_cash_session_with_closing', { p_session_id: sessionId, p_close: close, p_closure: closure });
+    if (error) throw error;
+    return Boolean(data);
+  }
+
+  async getProductionBatches(): Promise<DbProductionBatch[]> {
+    const { data, error } = await this.supabase.from('production_batches').select('*').order('produced_at', { ascending: false });
+    if (error) throw error;
+    return data.map((row: Record<string, unknown>) => ({
+      id: String(row.id), productId: String(row.product_id), quantityProduced: Number(row.quantity_produced),
+      totalCost: Number(row.total_cost), wasteQuantity: Number(row.waste_quantity), expiresAt: row.expires_at ? String(row.expires_at) : undefined,
+      responsibleUserId: String(row.responsible_user_id), operationId: String(row.operation_id), producedAt: String(row.produced_at),
+      consumption: (row.consumption || []) as DbInventoryConsumption[],
+    }));
+  }
+
+  async recordProductionBatch(batch: DbProductionBatch): Promise<boolean> {
+    const { data, error } = await this.supabase.rpc('record_production_batch', { p_batch: batch });
+    if (error) throw error;
+    return Boolean(data);
+  }
+
 }
+
+function mapCashSession(row: Record<string, unknown>): DbCashSession {
+  return {
+    id: String(row.id), openingAmount: Number(row.opening_amount), openingDenominations: (row.opening_denominations || {}) as Record<string, number>,
+    openedBy: String(row.opened_by), openedAt: String(row.opened_at), expectedCash: row.expected_cash == null ? undefined : Number(row.expected_cash),
+    countedCash: row.counted_cash == null ? undefined : Number(row.counted_cash), difference: row.difference == null ? undefined : Number(row.difference),
+    closingDenominations: row.closing_denominations as Record<string, number> | undefined, closedBy: row.closed_by ? String(row.closed_by) : undefined,
+    closedAt: row.closed_at ? String(row.closed_at) : undefined,
+  };
+}
+
+// Supabase's dynamic schema returns untyped rows; conversion stays at this boundary.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapOrder(row: Record<string, any>): DbOrder { return {
+      id: row.id,
+      folio: row.folio || row.id,
+      operationId: row.operation_id || undefined,
+      deviceId: row.device_id || undefined,
+      channel: row.channel || 'POS',
+      paymentProvider: row.payment_provider || undefined,
+      pickup: row.pickup || undefined,
+      baristaId: row.barista_id || undefined,
+      customerName: row.customer_name,
+      items: row.items, // already jsonb
+      subtotal: row.subtotal == null ? Number(row.total) : Number(row.subtotal),
+      discount: row.discount == null ? 0 : Number(row.discount),
+      discountType: row.discount_type || undefined,
+      discountReason: row.discount_reason || undefined,
+      discountAuthorizedBy: row.discount_authorized_by || undefined,
+      tax: row.tax == null ? 0 : Number(row.tax),
+      total: Number(row.total),
+      status: row.status,
+      paymentStatus: row.payment_status || undefined,
+      paymentMethod: row.payment_method,
+      paymentId: row.payment_id || undefined,
+      paymentIntentId: row.payment_intent_id || undefined,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at || row.created_at,
+      notes: row.notes || undefined,
+      cancellationReason: row.cancellation_reason || undefined,
+      inventoryAppliedAt: row.inventory_applied_at || undefined,
+    }; }

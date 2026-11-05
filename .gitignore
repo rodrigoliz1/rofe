@@ -11,6 +11,16 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
+.env.*
+!.env.example
+!backend/.env.example
+backend/security.json
+backend/security-devices.json
+backend/security-devices.json.*.tmp
+playwright-report/
+test-results/
+coverage/
 
 # Editor directories and files
 .vscode/*
@@ -23,3 +33,7 @@ dist-ssr
 *.sln
 *.sw?
 .vite/
+
+.rofe-e2e-dist/
+backend/rofe-product-images/
+.impeccable/review/

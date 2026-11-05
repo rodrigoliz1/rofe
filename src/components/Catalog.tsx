@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import type { Product } from '../types';
 import { ProductIcon } from './Icons';
+import { apiUrl } from '../services/api';
+import { UiIcon } from './UiIcon';
 
 interface ProductCardImageProps {
   src: string;
@@ -22,7 +24,7 @@ const ProductCardImage: React.FC<ProductCardImageProps> = ({ src, alt, icon }) =
   return (
     <div className="product-card-image-wrapper">
       <img
-        src={src}
+        src={src.startsWith('/api/') ? apiUrl(src) : src}
         alt={alt}
         className="product-card-image"
         loading="lazy"
@@ -34,29 +36,32 @@ const ProductCardImage: React.FC<ProductCardImageProps> = ({ src, alt, icon }) =
 
 interface CatalogProps {
   products: Product[];
+  loading: boolean;
+  onRetry: () => void;
   selectedCategory: string;
   onSelectCategory: (category: 'all' | 'coffee' | 'cold' | 'bakery') => void;
   onProductClick: (product: Product) => void;
 }
 
 export const Catalog: React.FC<CatalogProps> = ({
-  products,
+  products, loading, onRetry,
   selectedCategory,
   onSelectCategory,
   onProductClick,
 }) => {
-  const filteredProducts = products.filter(
-    (p) => selectedCategory === 'all' || p.category === selectedCategory
-  );
+  const [search, setSearch] = useState('');
+  const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const filteredProducts = products.filter((p) => (selectedCategory === 'all' || p.category === selectedCategory) && normalize(`${p.name} ${p.description}`).includes(normalize(search.trim())));
 
   return (
     <div className="catalog-container">
       <div className="catalog-header">
-        <h2 className="catalog-title">MENÚ</h2>
+        <div className="catalog-heading"><div><h2 className="catalog-title">MENÚ</h2><p>Tu pausa empieza aquí.</p></div><label className="catalog-search"><UiIcon name="search" /><span className="sr-only">Buscar en el menú</span><input type="search" placeholder="Buscar tu favorito" value={search} onChange={(event) => setSearch(event.target.value)} /></label></div>
         <div className="categories-tabs">
           {(['all', 'coffee', 'cold', 'bakery'] as const).map((cat) => (
             <button
               key={cat}
+              aria-pressed={selectedCategory === cat}
               className={`category-tab ${selectedCategory === cat ? 'active' : ''}`}
               onClick={() => onSelectCategory(cat)}
             >
@@ -69,13 +74,17 @@ export const Catalog: React.FC<CatalogProps> = ({
         </div>
       </div>
 
-      <div className="products-grid">
+      <div className="products-grid" aria-busy={loading}>
+        {loading && <p className="catalog-empty" role="status">Preparando el menú…</p>}
+        {!loading && filteredProducts.length === 0 && <div className="catalog-empty"><UiIcon name="coffee" size={40} /><h3>{products.length ? 'No encontramos ese antojo' : 'El menú aún no está disponible'}</h3><p>{products.length ? 'Prueba otro nombre o cambia de categoría.' : 'Revisa la conexión para cargar los productos.'}</p><button className="btn btn-secondary" onClick={products.length ? () => { setSearch(''); onSelectCategory('all'); } : onRetry}>{products.length ? 'Ver todo el menú' : 'Volver a cargar'}</button></div>}
         {filteredProducts.map((product) => {
           const isDepleted = product.stock !== undefined && product.stock <= 0;
           return (
-            <div
+            <button
+              type="button"
               key={product.id}
               className={`product-card ${isDepleted ? 'product-card-depleted' : ''}`}
+              disabled={isDepleted}
               onClick={() => {
                 if (!isDepleted) {
                   onProductClick(product);
@@ -94,7 +103,7 @@ export const Catalog: React.FC<CatalogProps> = ({
                   {isDepleted ? 'Agotado' : product.customizable ? 'Personalizar' : 'Agregar'}
                 </span>
               </div>
-            </div>
+            </button>
           );
         })}
       </div>

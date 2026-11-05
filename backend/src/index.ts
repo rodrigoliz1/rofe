@@ -1,50 +1,232 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import type { AuthPrincipal } from './auth/types';
+import { randomUUID } from 'crypto';
 import { db } from './db';
+import { registerCatalogRoutes } from './routes/catalog';
+import { registerPickupRoutes, refreshPickupOrder, cancelPickupOrder } from './routes/pickup';
+import { StripePickupService } from './payments/stripePickup';
+import { reconcilePointOrder, sendOrderToPoint } from './payments/orderPayments';
+import { getEnv } from './config/env';
+import { createSecurityStore } from './auth/store';
+import { AuthService } from './auth/service';
+import { DiscountAuthorizationService } from './auth/discountAuthorization';
+import { authenticate, requireRole } from './middleware/auth';
+import { requestContext } from './middleware/requestContext';
+import { AppError, errorHandler, notFoundHandler } from './utils/errors';
+import { createOrderSchema } from './domain/orders';
+import { priceOrder, toMoney } from './domain/pricing';
+import { applyAuthorizedDiscount } from './domain/discounts';
+import type { PricedOrderItem } from './domain/pricing';
+import { calculateRecipeConsumption } from './domain/inventory';
+import { totalDenominations } from './domain/cash';
+import { MercadoPagoService } from './payments/mercadoPago';
+import { z } from 'zod';
+import { buildOperationalReport, salesCsv } from './accounting/reports';
 
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const env = getEnv();
+process.env.TZ = 'America/Mexico_City';
+const PORT = env.PORT;
+const securityStore = createSecurityStore(env);
+const authService = new AuthService(env, securityStore);
+const discountAuthorization = new DiscountAuthorizationService(env);
+const mercadoPago = new MercadoPagoService(env);
+const stripePickup = new StripePickupService(env);
+const requireAuth = authenticate(authService);
 
+const auditSensitive = (req: express.Request, input: { action: string; entity: string; entityId?: string; before?: unknown; after?: unknown }) =>
+  securityStore.addAudit({
+    userId: req.principal?.role === 'POS_DEVICE' ? undefined : req.principal?.subjectId,
+    deviceId: req.principal?.deviceId,
+    ...input,
+    requestId: req.requestId,
+    ip: req.ip,
+    timestamp: new Date().toISOString(),
+  });
+
+app.set('trust proxy', env.TRUST_PROXY);
+app.disable('x-powered-by');
+app.use(requestContext);
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+const allowedOrigins = new Set(env.ALLOWED_ORIGINS.split(',').map((origin) => origin.trim()).filter(Boolean));
 app.use(cors({
-  origin: '*' // Allow all origins for easier PWA access on local network
+  credentials: true,
+  origin(origin, callback) {
+    // When credentials: true, Access-Control-Allow-Origin must NOT be '*'.
+    // Reflect the origin back or fall back to the first allowed origin.
+    if (!origin || allowedOrigins.has(origin)) {
+      return callback(null, origin || env.ALLOWED_ORIGINS.split(',')[0].trim());
+    }
+    callback(new AppError(403, 'ORIGIN_NOT_ALLOWED', 'Origen no autorizado.'));
+  },
 }));
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+const jsonBody = express.json({ limit: '1500kb' });
+const stripeBody = express.raw({ type: 'application/json', limit: '256kb' });
+app.use((req, res, next) => req.path === '/api/webhooks/stripe' ? stripeBody(req, res, next) : jsonBody(req, res, next));
+app.use(express.urlencoded({ extended: false, limit: '32kb' }));
+app.use(cookieParser());
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 8,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  handler: (_req, res) => res.status(429).json({ code: 'AUTH_RATE_LIMITED', message: 'Demasiados intentos. Espera unos minutos.' }),
+});
+const apiLimiter = rateLimit({ windowMs: 60 * 1000, limit: env.API_RATE_LIMIT_MAX, standardHeaders: 'draft-8', legacyHeaders: false, handler: (req, res) => res.status(429).json({ error: { code: 'RATE_LIMITED', message: 'Hay demasiadas solicitudes. Espera un momento e intenta de nuevo.' }, requestId: req.requestId }) });
+app.use('/api', apiLimiter);
+
+const credentialsSchema = z.object({ email: z.string().email(), password: z.string().min(6).max(128) });
+const deviceRegistrationSchema = z.object({ name: z.string().trim().min(2).max(80), enrollmentSecret: z.string().min(16).max(256) });
+const deviceLoginSchema = z.object({ deviceId: z.string().uuid(), deviceToken: z.string().min(32).max(256) });
+const supplierSchema = z.object({
+  name: z.string().trim().min(2).max(160),
+  contactName: z.string().trim().max(120).optional(),
+  phone: z.string().trim().max(40).optional(),
+  email: z.string().email().optional(),
+  notes: z.string().trim().max(500).optional(),
+});
+const purchaseSchema = z.object({
+  operationId: z.string().uuid(),
+  supplierId: z.string().uuid().optional(),
+  invoiceReference: z.string().trim().max(120).optional(),
+  paymentMethod: z.enum(['cash', 'card', 'transfer', 'credit']),
+  cashDenominations: z.record(z.string(), z.number().int().min(0)).optional(),
+  notes: z.string().trim().max(500).optional(),
+  items: z.array(z.object({ ingredientId: z.string().min(1).max(100), quantity: z.number().positive(), unitCost: z.number().min(0).max(1_000_000) })).min(1).max(100),
+});
+const wasteSchema = z.object({ operationId: z.string().uuid(), ingredientId: z.string().min(1).max(100), quantity: z.number().positive(), reason: z.string().trim().min(5).max(240) });
+const productionSchema = z.object({
+  operationId: z.string().uuid(), productId: z.string().min(1).max(100), quantityProduced: z.number().int().positive().max(10_000),
+  wasteQuantity: z.number().int().min(0).max(10_000).default(0), expiresAt: z.string().datetime().optional(),
+}).refine((value) => value.wasteQuantity < value.quantityProduced, { path: ['wasteQuantity'], message: 'La merma debe ser menor a la producción.' });
+const userCreateSchema = z.object({ email: z.string().email(), password: z.string().min(10).max(128), role: z.enum(['ADMIN', 'MANAGER', 'BARISTA']) });
+const userUpdateSchema = z.object({ password: z.string().min(10).max(128).optional(), role: z.enum(['ADMIN', 'MANAGER', 'BARISTA']).optional(), active: z.boolean().optional() }).refine((value) => Object.keys(value).length > 0);
+const discountAuthorizationSchema = z.object({
+  operationId: z.string().uuid(),
+  type: z.enum(['PERCENTAGE', 'FIXED', 'COURTESY']),
+  value: z.number().min(0).max(1_000_000),
+  reason: z.string().trim().min(5).max(240),
+}).superRefine((value, context) => {
+  if (value.type === 'PERCENTAGE' && (value.value <= 0 || value.value > 100)) context.addIssue({ code: 'custom', path: ['value'], message: 'El porcentaje debe estar entre 0 y 100.' });
+  if (value.type === 'FIXED' && value.value <= 0) context.addIssue({ code: 'custom', path: ['value'], message: 'El importe debe ser mayor a cero.' });
+});
+const refreshCookieOptions = {
+  httpOnly: true,
+  secure: env.NODE_ENV === 'production',
+  sameSite: env.NODE_ENV === 'production' ? 'none' as const : 'lax' as const,
+  path: '/api/auth',
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+};
+
+app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+app.get('/ready', async (_req, res, next) => {
+  try {
+    await db.getProducts();
+    res.json({ status: 'ready' });
+  } catch (error) {
+    next(new AppError(503, 'NOT_READY', 'El servicio aún no está listo.', error));
+  }
+});
+
+app.post('/api/auth/login', authLimiter, async (req, res, next) => {
+  try {
+    const input = credentialsSchema.parse(req.body);
+    const session = await authService.login(input.email, input.password);
+    res.cookie('rofe_refresh', session.refreshToken, refreshCookieOptions);
+    await securityStore.addAudit({ userId: session.principal.subjectId, action: 'LOGIN', entity: 'SESSION', entityId: session.principal.sessionId, requestId: req.requestId, ip: req.ip, timestamp: new Date().toISOString() });
+    res.json({ accessToken: session.accessToken, principal: session.principal });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/auth/device/register', authLimiter, async (req, res, next) => {
+  try {
+    const input = deviceRegistrationSchema.parse(req.body);
+    const device = await authService.registerDevice(input.name, input.enrollmentSecret);
+    await securityStore.addAudit({ deviceId: device.deviceId, action: 'DEVICE_REGISTER', entity: 'DEVICE', entityId: device.deviceId, requestId: req.requestId, ip: req.ip, timestamp: new Date().toISOString() });
+    res.status(201).json(device);
+  } catch (error) { next(error); }
+});
+
+app.post('/api/auth/device/login', authLimiter, async (req, res, next) => {
+  try {
+    const input = deviceLoginSchema.parse(req.body);
+    const session = await authService.loginDevice(input.deviceId, input.deviceToken);
+    res.cookie('rofe_refresh', session.refreshToken, refreshCookieOptions);
+    res.json({ accessToken: session.accessToken, principal: session.principal });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/auth/refresh', async (req, res, next) => {
+  try {
+    const refreshToken = typeof req.cookies.rofe_refresh === 'string' ? req.cookies.rofe_refresh : '';
+    const session = await authService.refresh(refreshToken);
+    res.cookie('rofe_refresh', session.refreshToken, refreshCookieOptions);
+    res.json({ accessToken: session.accessToken, principal: session.principal });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/auth/logout', requireAuth, async (req, res, next) => {
+  try {
+    await authService.logout(req.principal!.sessionId);
+    await securityStore.addAudit({ userId: req.principal!.role === 'POS_DEVICE' ? undefined : req.principal!.subjectId, deviceId: req.principal!.deviceId, action: 'LOGOUT', entity: 'SESSION', entityId: req.principal!.sessionId, requestId: req.requestId, ip: req.ip, timestamp: new Date().toISOString() });
+    res.clearCookie('rofe_refresh', { httpOnly: refreshCookieOptions.httpOnly, secure: refreshCookieOptions.secure, sameSite: refreshCookieOptions.sameSite, path: refreshCookieOptions.path });
+    res.status(204).end();
+  } catch (error) { next(error); }
+});
 
 // --- Server-Sent Events (SSE) Client List ---
-let clients: express.Response[] = [];
+let clients: Array<{ response: express.Response; principal: AuthPrincipal }> = [];
 
 // Broadcast helper
-const broadcast = (data: any) => {
+const broadcast = (data: { type: string; [key: string]: unknown }) => {
   const message = `data: ${JSON.stringify(data)}\n\n`;
   clients.forEach((client) => {
     try {
-      client.write(message);
-    } catch (err) {
-      console.error('Error writing to client stream:', err);
+      const order = data.order as { deviceId?: string } | undefined;
+      if (client.principal.role === 'POS_DEVICE' && order && order.deviceId !== client.principal.deviceId) return;
+      client.response.write(message);
+    } catch (error) {
+      console.error('Unable to write to SSE client:', error);
     }
   });
 };
 
 // --- SSE Endpoint ---
-app.get('/api/events', (req, res) => {
+registerPickupRoutes(app, { env, requireAuth, audit: auditSensitive, broadcast }, stripePickup);
+app.get('/api/events', requireAuth, requireRole('ADMIN', 'MANAGER', 'BARISTA', 'POS_DEVICE'), (req, res) => {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
+    'Cache-Control': 'no-cache, no-transform',
+    'X-Accel-Buffering': 'no',
     'Connection': 'keep-alive',
   });
 
   // Keep-alive heartbeat
   res.write('data: {"type":"connected"}\n\n');
 
-  clients.push(res);
+  clients.push({ response: res, principal: req.principal! });
+  const token = req.header('authorization')?.slice(7) ?? '';
+  const sessionCheck = setInterval(() => {
+    void authService.verifyActiveAccessToken(token).catch(() => res.end());
+  }, 30_000);
+  const heartbeat = setInterval(() => {
+    if (!res.writableEnded) res.write(': heartbeat\n\n');
+  }, 20_000);
   console.log(`Cliente SSE conectado. Total conectados: ${clients.length}`);
 
   req.on('close', () => {
-    clients = clients.filter((client) => client !== res);
+    clearInterval(heartbeat);
+    clearInterval(sessionCheck);
+    clients = clients.filter((client) => client.response !== res);
     console.log(`Cliente SSE desconectado. Total conectados: ${clients.length}`);
   });
 });
@@ -52,7 +234,7 @@ app.get('/api/events', (req, res) => {
 // --- API Routes ---
 
 // Get active orders (Barista View)
-app.get('/api/orders', async (_req, res) => {
+app.get('/api/orders', requireAuth, requireRole('ADMIN', 'MANAGER', 'BARISTA'), async (_req, res) => {
   try {
     const orders = await db.getOrders();
     res.json(orders);
@@ -63,36 +245,69 @@ app.get('/api/orders', async (_req, res) => {
 });
 
 // Create new order & trigger Mercado Pago Point or Cash flow
-app.post('/api/orders', async (req, res) => {
+app.post('/api/orders', requireAuth, requireRole('POS_DEVICE'), async (req, res, next) => {
   try {
-    const { customerName, items, total, paymentMethod } = req.body;
-
-    if (!customerName || !items || !total || !paymentMethod) {
-       res.status(400).json({ error: 'Faltan parámetros obligatorios.' });
-       return;
+    const input = createOrderSchema.parse(req.body);
+    const existing = await db.getOrderByOperationId(input.operationId);
+    const simulation = !mercadoPago.isConfigured() && env.NODE_ENV !== 'production' && env.ENABLE_PAYMENT_SIMULATION;
+    if (existing) {
+      if (existing.deviceId !== req.principal!.deviceId || existing.paymentMethod !== input.paymentMethod) {
+        throw new AppError(409, 'OPERATION_CONFLICT', 'Esta operación ya pertenece a otro pedido o método de pago.');
+      }
+      const order = existing.paymentMethod === 'card' && !simulation ? await sendOrderToPoint(db, mercadoPago, existing) : existing;
+      res.status(200).json({ order, mode: order.paymentMethod === 'cash' ? 'cash' : simulation ? 'simulation' : 'production', idempotentReplay: true });
+      return;
     }
+    if (input.paymentMethod === 'card' && !mercadoPago.isConfigured() && !simulation) {
+      throw new AppError(503, 'PAYMENT_PROVIDER_NOT_CONFIGURED', 'La terminal no está disponible. Selecciona efectivo o solicita ayuda.');
+    }
+    const basePricing = priceOrder(await db.getProducts(), input.items);
+    const authorizedDiscount = input.discountAuthorizationToken
+      ? discountAuthorization.verify(input.discountAuthorizationToken, input.operationId)
+      : undefined;
+    const pricing = applyAuthorizedDiscount(basePricing, authorizedDiscount);
+    const orderId = input.operationId;
+    const folio = `R-${orderId.replaceAll('-', '').slice(0, 10).toUpperCase()}`;
 
-    // Generate neat order ID (e.g. #042)
-    const randomNum = Math.floor(Math.random() * 90) + 10;
-    const orderId = `#0${randomNum}`;
-
-    // Create Order object
     const newOrder = {
       id: orderId,
-      customerName,
-      items,
-      total,
-      status: paymentMethod === 'cash' ? 'pending_cash_payment' : 'pending_payment',
-      paymentMethod: paymentMethod as 'card' | 'cash',
+      folio,
+      operationId: input.operationId,
+      deviceId: req.principal!.deviceId,
+      customerName: input.customerName || 'Cliente',
+      items: pricing.items,
+      subtotal: pricing.subtotal,
+      discount: pricing.discount,
+      discountType: pricing.discountAuthorization?.type,
+      discountReason: pricing.discountAuthorization?.reason,
+      discountAuthorizedBy: pricing.discountAuthorization?.authorizedBy,
+      tax: pricing.tax,
+      total: pricing.total,
+      status: 'PENDING_PAYMENT',
+      paymentStatus: input.paymentMethod === 'cash' ? 'NOT_REQUIRED' : 'PENDING',
+      paymentMethod: input.paymentMethod,
+      notes: input.notes,
       createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
 
-    if (paymentMethod === 'cash') {
-      // Save directly to database
+    if (pricing.total === 0) {
       await db.createOrder(newOrder);
-      console.log(`Pedido en efectivo ${orderId} creado para ${customerName}.`);
-      
-      // Broadcast new order to barista
+      await db.confirmOrderPayment(orderId, `courtesy-${orderId}`, calculateRecipeConsumption(pricing.items));
+      const order = await db.getOrderById(orderId);
+      broadcast({ type: 'order_paid', orderId, order });
+      broadcast({ type: 'inventory_updated' });
+      res.status(201).json({ order, mode: 'courtesy' });
+      return;
+    }
+
+    if (input.paymentMethod === 'cash') {
+      const inserted = await db.createOrder(newOrder);
+      if (!inserted) {
+        const replay = await db.getOrderByOperationId(input.operationId);
+        res.status(200).json({ order: replay, mode: 'cash', idempotentReplay: true });
+        return;
+      }
       broadcast({
         type: 'order_updated',
         orderId,
@@ -107,104 +322,105 @@ app.post('/api/orders', async (req, res) => {
       return;
     }
 
-    // --- Card Payment (Mercado Pago Point) ---
-    // Forzamos a leer como string y quitamos comillas accidentales
-    const accessToken = String(process.env.MERCADO_PAGO_ACCESS_TOKEN || '').replace(/['"]/g, '').trim();
-    const deviceId = String(process.env.POINT_DEVICE_ID || '').replace(/['"]/g, '').trim();
+    // Persist the stable external reference before contacting the terminal. A timeout
+    // can safely be retried with the same body and provider idempotency key.
+    const inserted = await db.createOrder(newOrder);
+    const stored = inserted ? newOrder : (await db.getOrderByOperationId(input.operationId))!;
+    const order = simulation ? stored : await sendOrderToPoint(db, mercadoPago, stored);
+    res.status(inserted ? 201 : 200).json({ order, mode: simulation ? 'simulation' : 'production', idempotentReplay: !inserted });
 
-    console.log(`[DEBUG MP] Intentando leer Token: ${accessToken ? 'Existe (oculto)' : 'FALTA'} | Device: ${deviceId}`);
-
-    // Check configuration
-    if (!accessToken || !deviceId || accessToken.includes('tu_access_token')) {
-      console.warn('Backend corriendo en modo simulación (falta configurar Mercado Pago en .env).');
-      
-      // Save order in pending_payment state
-      await db.createOrder(newOrder);
-
-      res.status(201).json({
-        order: newOrder,
-        mode: 'simulation',
-        message: 'Advertencia: Servidor sin credenciales reales. Corriendo en modo de simulación.'
-      });
-      return;
-    }
-
-    console.log(`Enviando orden ${orderId} a Mercado Pago para terminal ${deviceId}...`);
-
-    // Call Mercado Pago Point Cloud API (Payment Intents)
-    const mpResponse = await fetch(`https://api.mercadopago.com/point/integration-api/devices/${deviceId}/payment-intents`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        'x-idempotency-key': `order-${orderId}-${Date.now()}`
-      },
-      body: JSON.stringify({
-        amount: Math.round(total * 100), // Envia 4500 centavos en vez de 45 pesos
-        additional_info: {
-          external_reference: orderId,
-          print_on_terminal: true
-        }
-      })
-    });
-
-    const mpData: any = await mpResponse.json();
-
-    if (!mpResponse.ok) {
-      console.error('Error al comunicarse con Mercado Pago:', mpData);
-      res.status(502).json({
-        error: 'Error de respuesta de la terminal de Mercado Pago.',
-        details: mpData
-      });
-      return;
-    }
-
-    // Store payment intent ID inside the order for tracking
-    const orderWithIntent = {
-      ...newOrder,
-      paymentIntentId: mpData.id
-    };
-    await db.createOrder(orderWithIntent);
-
-    console.log(`Intención de pago creada con éxito. ID: ${mpData.id}. Esperando tarjeta...`);
-
-    res.status(201).json({
-      order: orderWithIntent,
-      mode: 'production',
-      paymentIntent: mpData
-    });
   } catch (error) {
-    console.error('Error al procesar la orden:', error);
-    res.status(500).json({ error: 'Error interno del servidor.' });
+    next(error);
   }
 });
 
-// Sync offline orders
-app.post('/api/orders/sync', async (req, res) => {
+app.get('/api/orders/:id', requireAuth, requireRole('POS_DEVICE', 'ADMIN', 'MANAGER', 'BARISTA'), async (req, res, next) => {
   try {
-    const { syncData } = req.body;
-    if (!Array.isArray(syncData)) {
-      res.status(400).json({ error: 'Payload de sincronización inválido.' });
-      return;
+    let order = await db.getOrderById(req.params.id) ?? await db.getOrderByOperationId(req.params.id);
+    if (!order || (req.principal!.role === 'POS_DEVICE' && order.deviceId !== req.principal!.deviceId)) {
+      throw new AppError(404, 'ORDER_NOT_FOUND', 'Pedido no encontrado.');
     }
+    if (order.paymentIntentId && order.paymentStatus === 'PENDING') {
+      const result = order.paymentProvider === 'STRIPE'
+        ? await refreshPickupOrder(stripePickup, order)
+        : await reconcilePointOrder(db, await mercadoPago.getOrder(order.paymentIntentId));
+      order = result.order;
+      if (result.changed) {
+        await auditSensitive(req, { action: 'PAYMENT_RECONCILED', entity: 'ORDER', entityId: order.id, after: { paymentStatus: order.paymentStatus } });
+        broadcast({ type: 'order_updated', orderId: order.id, order });
+        broadcast({ type: 'inventory_updated' });
+      }
+    }
+    res.json(order);
+  } catch (error) { next(error); }
+});
 
+app.post('/api/orders/:id/cancel-payment', requireAuth, requireRole('POS_DEVICE'), async (req, res, next) => {
+  try {
+    let order = await db.getOrderById(req.params.id) ?? await db.getOrderByOperationId(req.params.id);
+    if (!order || order.deviceId !== req.principal!.deviceId) throw new AppError(404, 'ORDER_NOT_FOUND', 'Pedido no encontrado.');
+    if (order.status === 'CANCELLED') { res.json({ order }); return; }
+    if (order.status !== 'PENDING_PAYMENT') throw new AppError(409, 'ORDER_ALREADY_PAID', 'El pago ya fue confirmado. Conserva el comprobante y solicita ayuda.');
+    if (order.paymentMethod === 'card' && mercadoPago.isConfigured() && order.paymentStatus === 'PENDING') {
+      order = await sendOrderToPoint(db, mercadoPago, order);
+      const cancelled = await mercadoPago.cancelOrder(order.paymentIntentId!, `cancel-${order.id}`);
+      if (!cancelled) throw new AppError(409, 'CANCELLATION_PENDING', 'Cancelación solicitada. Espera la confirmación en la terminal antes de iniciar otro pago.');
+    }
+    await db.updateOrderStatus(order.id, 'CANCELLED', undefined, undefined, 'Cancelado desde el punto de venta');
+    order = (await db.getOrders()).find((entry) => entry.id === order!.id)!;
+    await auditSensitive(req, { action: 'ORDER_CANCEL', entity: 'ORDER', entityId: order.id });
+    broadcast({ type: 'order_updated', orderId: order.id, order });
+    res.json({ order });
+  } catch (error) { next(error); }
+});
+
+// Sync offline orders
+app.post('/api/orders/sync', requireAuth, requireRole('POS_DEVICE'), async (req, res, next) => {
+  try {
+    const syncSchema = z.object({ operations: z.array(z.object({
+      operationId: z.string().uuid(),
+      type: z.literal('CREATE_CASH_ORDER'),
+      payload: createOrderSchema,
+    })).min(1).max(100) });
+    const { operations } = syncSchema.parse(req.body);
+    const products = await db.getProducts();
     let syncedCount = 0;
-    for (const record of syncData) {
-      const { order, cashTransaction, changeTransaction } = record;
-      if (order) {
-        try {
-          await db.createOrder(order);
-          syncedCount++;
-          if (cashTransaction) {
-            await db.addCashTransaction(cashTransaction);
-          }
-          if (changeTransaction) {
-            await db.addCashTransaction(changeTransaction);
-          }
-        } catch (e: any) {
-          // If the order already exists, it might throw a duplicate key error. We can ignore it or log it.
-          console.warn(`Error al sincronizar orden ${order.id}:`, e.message);
-        }
+    for (const operation of operations) {
+      const existing = await db.getOrderByOperationId(operation.operationId);
+      if (existing) {
+        if (existing.deviceId !== req.principal!.deviceId || existing.paymentMethod !== 'cash') throw new AppError(409, 'OPERATION_CONFLICT', 'La operación pertenece a otro pedido.');
+        continue;
+      }
+      if (operation.payload.paymentMethod !== 'cash' || operation.payload.operationId !== operation.operationId) {
+        throw new AppError(400, 'INVALID_OFFLINE_OPERATION', 'Sólo las ventas en efectivo pueden sincronizarse desde la outbox.');
+      }
+      if (operation.payload.discountAuthorizationToken) {
+        throw new AppError(400, 'OFFLINE_DISCOUNT_NOT_ALLOWED', 'Los descuentos requieren autorización en línea vigente.');
+      }
+      const pricing = priceOrder(products, operation.payload.items);
+      const now = new Date().toISOString();
+      const inserted = await db.createOrder({
+        id: operation.operationId,
+        folio: `R-${operation.operationId.replaceAll('-', '').slice(0, 10).toUpperCase()}`,
+        operationId: operation.operationId,
+        deviceId: req.principal!.deviceId,
+        customerName: operation.payload.customerName || 'Cliente',
+        items: pricing.items,
+        subtotal: pricing.subtotal,
+        discount: 0,
+        tax: 0,
+        total: pricing.total,
+        status: 'PENDING_PAYMENT',
+        paymentStatus: 'NOT_REQUIRED',
+        paymentMethod: 'cash',
+        notes: operation.payload.notes,
+        createdAt: now,
+        updatedAt: now,
+      });
+      if (inserted) {
+        syncedCount += 1;
+        const order = (await db.getOrders()).find((entry) => entry.operationId === operation.operationId);
+        broadcast({ type: 'order_updated', orderId: order?.id, order });
       }
     }
 
@@ -213,20 +429,51 @@ app.post('/api/orders/sync', async (req, res) => {
       broadcast({ type: 'inventory_updated' });
     }
 
-    res.json({ message: 'Sincronización completada', syncedOrders: syncedCount });
+    res.json({ message: 'Sincronización completada', syncedOrders: syncedCount, operationIds: operations.map((operation) => operation.operationId) });
   } catch (error) {
     console.error('Error en sync:', error);
-    res.status(500).json({ error: 'Error interno durante sincronización.' });
+    next(error);
   }
 });
 
 // Update order status (Barista View actions)
-app.post('/api/orders/:id/status', async (req, res) => {
+app.post('/api/orders/:id/status', requireAuth, requireRole('ADMIN', 'MANAGER', 'BARISTA'), async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, reason } = z.object({
+      status: z.enum(['IN_PREPARATION', 'READY', 'COMPLETED', 'CANCELLED']),
+      reason: z.string().trim().min(3).max(240).optional(),
+    }).parse(req.body);
 
-    await db.updateOrderStatus(id, status);
+    const currentOrder = (await db.getOrders()).find((order) => order.id === id);
+    if (!currentOrder) {
+      res.status(404).json({ error: 'Pedido no encontrado.' });
+      return;
+    }
+    const allowedTransitions: Record<string, string[]> = {
+      PENDING_PAYMENT: ['CANCELLED'],
+      PAID: ['IN_PREPARATION'],
+      IN_PREPARATION: ['READY'],
+      READY: ['IN_PREPARATION', 'COMPLETED'],
+    };
+    if (!(allowedTransitions[currentOrder.status] ?? []).includes(status)) {
+      throw new AppError(409, 'INVALID_ORDER_TRANSITION', `No se puede cambiar un pedido de ${currentOrder.status} a ${status}.`);
+    }
+    if (status === 'CANCELLED' && req.principal!.role === 'BARISTA') {
+      throw new AppError(403, 'CANCELLATION_REQUIRES_MANAGER', 'Una cancelación requiere autorización administrativa.');
+    }
+    if (status === 'CANCELLED' && !reason) {
+      throw new AppError(400, 'CANCELLATION_REASON_REQUIRED', 'Indica la razón de cancelación.');
+    }
+
+    if (status === 'CANCELLED' && currentOrder.paymentProvider === 'STRIPE') {
+      const cancelled = await cancelPickupOrder(stripePickup, currentOrder);
+      if (cancelled.paymentStatus === 'APPROVED') throw new AppError(409, 'ORDER_ALREADY_PAID', 'El pago ya fue confirmado. Usa una devolución para cancelar la venta.');
+    } else if (status === 'CANCELLED' && currentOrder.paymentMethod === 'card' && currentOrder.paymentIntentId) {
+      if (!await mercadoPago.cancelOrder(currentOrder.paymentIntentId, `cancel-${currentOrder.id}`)) throw new AppError(409, 'CANCELLATION_PENDING', 'Cancelación solicitada. Espera la confirmación de la terminal.');
+    }
+
+    await db.updateOrderStatus(id, status, undefined, undefined, reason);
     const orders = await db.getOrders();
     const updatedOrder = orders.find(o => o.id === id);
 
@@ -244,51 +491,101 @@ app.post('/api/orders/:id/status', async (req, res) => {
       order: updatedOrder
     });
 
+    if (status === 'CANCELLED') {
+      await securityStore.addAudit({ userId: req.principal!.subjectId, deviceId: currentOrder.deviceId, action: 'ORDER_CANCEL', entity: 'ORDER', entityId: id, before: { status: currentOrder.status }, after: { status, reason }, requestId: req.requestId, ip: req.ip, timestamp: new Date().toISOString() });
+    }
+
     res.json(updatedOrder);
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Error al actualizar estado.' });
+    next(error);
   }
 });
 
-// Process cash payment confirmation from barista view
-app.post('/api/orders/:id/cash-payment', async (req, res) => {
+app.post('/api/orders/:id/refund', requireAuth, requireRole('ADMIN', 'MANAGER'), async (req, res, next) => {
   try {
-    const { id } = req.params;
-    const { receivedDenominations, changeDenominations, receivedAmount, changeAmount } = req.body;
-
-    if (!receivedDenominations || !changeDenominations || receivedAmount === undefined || changeAmount === undefined) {
-      res.status(400).json({ error: 'Faltan parámetros de denominación.' });
+    const input = z.object({
+      operationId: z.string().uuid(),
+      reason: z.string().trim().min(5).max(240),
+      cashDenominations: z.record(z.string(), z.number().int().min(0)).optional(),
+    }).parse(req.body);
+    const order = (await db.getOrders()).find((entry) => entry.id === req.params.id);
+    if (!order) throw new AppError(404, 'ORDER_NOT_FOUND', 'Pedido no encontrado.');
+    if (order.status === 'REFUNDED' || order.paymentStatus === 'REFUNDED') {
+      res.json({ order, idempotentReplay: true });
       return;
     }
+    if (order.paymentStatus !== 'APPROVED') throw new AppError(409, 'ORDER_NOT_PAID', 'Sólo una venta pagada puede devolverse.');
+    if (order.paymentMethod === 'cash') {
+      if (!input.cashDenominations || Math.abs(totalDenominations(input.cashDenominations) - order.total) > 0.001) {
+        throw new AppError(400, 'REFUND_CASH_MISMATCH', 'Las denominaciones de devolución deben sumar exactamente el total.');
+      }
+      if (!await db.getOpenCashSession()) throw new AppError(409, 'CASH_SESSION_REQUIRED', 'Abre caja antes de devolver efectivo.');
+    } else if (order.paymentProvider === 'STRIPE') {
+      await stripePickup.refund(order);
+    } else if (order.paymentIntentId && mercadoPago.isConfigured()) {
+      await mercadoPago.refundOrder(order.paymentIntentId, input.operationId);
+    } else if (env.NODE_ENV === 'production' || !env.ENABLE_PAYMENT_SIMULATION) {
+      throw new AppError(409, 'PAYMENT_REFERENCE_MISSING', 'La venta no tiene una referencia de Mercado Pago para devolver.');
+    }
+    const committed = await db.applyOrderRefund({ orderId: order.id, operationId: input.operationId, reason: input.reason, userId: req.principal!.subjectId, cashDenominations: input.cashDenominations });
+    const refunded = (await db.getOrders()).find((entry) => entry.id === order.id)!;
+    await auditSensitive(req, { action: 'REFUND', entity: 'ORDER', entityId: order.id, before: order, after: { status: refunded.status, paymentStatus: refunded.paymentStatus, reason: input.reason } });
+    broadcast({ type: 'order_updated', orderId: order.id, order: refunded });
+    broadcast({ type: 'inventory_updated' });
+    broadcast({ type: 'cash_updated' });
+    res.json({ order: refunded, idempotentReplay: !committed });
+  } catch (error) { next(error); }
+});
 
-    // Update order status to paid
-    await db.updateOrderStatus(id, 'paid', `cash-payment-${Date.now()}`);
+// Process cash payment confirmation from barista view
+app.post('/api/orders/:id/cash-payment', requireAuth, requireRole('ADMIN', 'MANAGER', 'BARISTA'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { receivedDenominations, changeDenominations, receivedAmount, changeAmount } = z.object({
+      receivedDenominations: z.record(z.string(), z.number().int().min(0)),
+      changeDenominations: z.record(z.string(), z.number().int().min(0)),
+      receivedAmount: z.number().min(0).max(1_000_000),
+      changeAmount: z.number().min(0).max(1_000_000),
+    }).strict().parse(req.body);
+
     const orders = await db.getOrders();
-    const updatedOrder = orders.find(o => o.id === id);
-
-    if (!updatedOrder) {
+    const currentOrder = orders.find(o => o.id === id);
+    if (!currentOrder) {
       res.status(404).json({ error: 'Pedido no encontrado.' });
       return;
     }
-
-    // 1. Add customer payment transaction
-    await db.addCashTransaction({
-      type: 'payment',
-      amount: receivedAmount,
-      description: `Pago en efectivo recibido para orden ${id}`,
-      denominations: receivedDenominations
-    });
-
-    // 2. Add change transaction (if any change was given)
-    if (changeAmount > 0) {
-      await db.addCashTransaction({
-        type: 'change',
-        amount: changeAmount,
-        description: `Cambio devuelto para orden ${id}`,
-        denominations: changeDenominations
-      });
+    if (currentOrder.paymentStatus === 'APPROVED' || currentOrder.status === 'PAID') {
+      res.json({ message: 'El pago ya estaba registrado.', order: currentOrder, idempotentReplay: true });
+      return;
     }
+    if (currentOrder.paymentMethod !== 'cash') throw new AppError(409, 'PAYMENT_METHOD_MISMATCH', 'Este pedido no fue creado para pago en efectivo.');
+    if (!await db.getOpenCashSession()) {
+      throw new AppError(409, 'CASH_SESSION_REQUIRED', 'Abre una sesión de caja antes de cobrar en efectivo.');
+    }
+    const receivedFromDenominations = totalDenominations(receivedDenominations);
+    const changeFromDenominations = totalDenominations(changeDenominations);
+    if (Math.abs(receivedFromDenominations - Number(receivedAmount)) > 0.001 || Math.abs(changeFromDenominations - Number(changeAmount)) > 0.001) {
+      throw new AppError(400, 'CASH_TOTAL_MISMATCH', 'Las denominaciones no coinciden con los importes capturados.');
+    }
+    if (receivedFromDenominations < currentOrder.total || Math.abs(receivedFromDenominations - changeFromDenominations - currentOrder.total) > 0.001) {
+      throw new AppError(400, 'CASH_PAYMENT_MISMATCH', 'El efectivo recibido y el cambio no cuadran con el total del pedido.');
+    }
+
+    const committed = await db.confirmCashOrderPayment({
+      orderId: id,
+      paymentId: `cash-${id}`,
+      consumption: calculateRecipeConsumption(currentOrder.items as PricedOrderItem[]),
+      receivedAmount,
+      changeAmount,
+      receivedDenominations,
+      changeDenominations,
+    });
+    if (!committed) {
+      const replayOrder = (await db.getOrders()).find(o => o.id === id)!;
+      res.json({ message: 'El pago ya estaba registrado.', order: replayOrder, idempotentReplay: true });
+      return;
+    }
+    const updatedOrder = (await db.getOrders()).find(o => o.id === id)!;
 
     console.log(`[EFECTIVO] Pedido ${id} cobrado: Recibido $${receivedAmount}, Cambio $${changeAmount}.`);
 
@@ -300,155 +597,67 @@ app.post('/api/orders/:id/cash-payment', async (req, res) => {
     });
     broadcast({ type: 'cash_updated' });
 
+    await securityStore.addAudit({ userId: req.principal!.subjectId, deviceId: currentOrder.deviceId, action: 'CASH_PAYMENT', entity: 'ORDER', entityId: id, requestId: req.requestId, ip: req.ip, after: { receivedAmount, changeAmount }, timestamp: new Date().toISOString() });
+
     res.json({ message: 'Pago en efectivo registrado con éxito.', order: updatedOrder });
   } catch (error) {
-    console.error('Error al registrar pago en efectivo:', error);
-    res.status(500).json({ error: 'Error interno del servidor.' });
+    next(error);
   }
 });
 
 // Webhook endpoint for Mercado Pago Point (Cards)
-app.post('/api/webhooks/mercadopago', async (req, res) => {
+app.post('/api/webhooks/mercadopago', async (req, res, next) => {
   try {
-    const type = req.body?.type || req.query?.topic || req.query?.type;
+    const queryDataId = typeof req.query['data.id'] === 'string' ? req.query['data.id'] : undefined;
+    const bodyDataId = typeof req.body?.data?.id === 'string' ? req.body.data.id : undefined;
+    const dataId = queryDataId || bodyDataId;
+    const signatureValid = mercadoPago.validateWebhookSignature({
+      xSignature: req.header('x-signature'),
+      xRequestId: req.header('x-request-id'),
+      dataId,
+    });
+    if (!signatureValid || !dataId) throw new AppError(401, 'INVALID_WEBHOOK_SIGNATURE', 'Firma de webhook inválida.');
 
-    console.log(`Webhook recibido -> Tipo: ${type}`);
-
-    // --- ESCENARIO 1: Pago desde Terminal Point Smart ---
-    if (type === 'point_integration_wh') {
-      const pointState = req.body?.state; // 'FINISHED'
-      const paymentState = req.body?.payment?.state; // 'approved'
-      const orderId = req.body?.additional_info?.external_reference; // '#096'
-      const paymentId = req.body?.payment?.id; // 164264977366
-
-      if (pointState === 'FINISHED' && paymentState === 'approved' && orderId) {
-        console.log(`Pago físico aprobado para pedido: ${orderId}`);
-        
-        const orders = await db.getOrders();
-        const orderIndex = orders.findIndex((o) => o.id === orderId);
-        
-        if (orderIndex > -1 && orders[orderIndex].status !== 'paid') {
-          await db.updateOrderStatus(orderId, 'paid', paymentId);
-          const updatedOrders = await db.getOrders();
-          const paidOrder = updatedOrders.find(o => o.id === orderId);
-
-          console.log(`✅ Pedido ${orderId} marcado como PAGADO.`);
-
-          // Log card payment transaction
-          if (paidOrder) {
-            await db.addCashTransaction({
-              type: 'card_payment',
-              amount: paidOrder.total,
-              description: `Pago con tarjeta (Físico) para orden ${paidOrder.id}`,
-              denominations: {}
-            });
-          }
-
-          // Disparar evento a la web para cerrar el modal
-          broadcast({
-            type: 'order_paid',
-            orderId: orderId,
-            order: paidOrder
-          });
-        }
-      }
-      else if (pointState === 'CANCELED' || pointState === 'ERROR' || paymentState === 'rejected') {
-        console.log(`⚠️ Pago físico rechazado/cancelado para pedido: ${orderId}`);
-        
-        const orders = await db.getOrders();
-        const orderIndex = orders.findIndex((o) => o.id === orderId);
-        
-        if (orderIndex > -1) {
-          // 1. Actualizamos el estado a 'rejected' (o 'failed' si así lo llamaste en CheckoutModal)
-          await db.updateOrderStatus(orderId, 'rejected'); 
-          
-          const updatedOrders = await db.getOrders();
-          const rejectedOrder = updatedOrders.find(o => o.id === orderId);
-
-          // 2. Disparamos la actualización normal para que tu CheckoutModal reaccione
-          broadcast({
-            type: 'order_updated',
-            orderId: orderId,
-            order: rejectedOrder
-          });
-        }
-      }
-    } 
-    // --- ESCENARIO 2: Pago tradicional / Fallback ---
-    else if (type === 'payment') {
-      const paymentId = req.body?.data?.id || req.query?.id || req.query?.['data.id'];
-      if (paymentId) {
-        const accessToken = String(process.env.MERCADO_PAGO_ACCESS_TOKEN || '').replace(/['"]/g, '').trim();
-
-        const mpResponse = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
-          headers: { 'Authorization': `Bearer ${accessToken}` }
-        });
-
-        if (mpResponse.ok) {
-          const paymentDetails: any = await mpResponse.json();
-          const status = paymentDetails.status;
-          const orderId = paymentDetails.external_reference;
-
-          if (status === 'approved' && orderId) {
-            const orders = await db.getOrders();
-            const orderIndex = orders.findIndex((o) => o.id === orderId);
-            
-            if (orderIndex > -1 && orders[orderIndex].status !== 'paid') {
-              await db.updateOrderStatus(orderId, 'paid', paymentId);
-              const updatedOrders = await db.getOrders();
-              const paidOrder = updatedOrders.find(o => o.id === orderId);
-
-              console.log(`✅ Pedido ${orderId} marcado como PAGADO (Fallback).`);
-              
-              if (paidOrder) {
-                await db.addCashTransaction({
-                  type: 'card_payment',
-                  amount: paidOrder.total,
-                  description: `Pago con tarjeta (Digital/Fallback) para orden ${paidOrder.id}`,
-                  denominations: {}
-                });
-              }
-
-              broadcast({ type: 'order_paid', orderId: orderId, order: paidOrder });
-            }
-          }
-        }
-      }
+    const { order, changed } = await reconcilePointOrder(db, await mercadoPago.getOrder(dataId));
+    if (changed) {
+      await auditSensitive(req, { action: 'PAYMENT_RECONCILED', entity: 'ORDER', entityId: order.id, after: { status: order.status, paymentStatus: order.paymentStatus } });
+      broadcast({ type: order.paymentStatus === 'APPROVED' ? 'order_paid' : 'order_updated', orderId: order.id, order });
+      broadcast({ type: 'inventory_updated' });
     }
 
-    // Siempre responder OK (200) para que Mercado Pago no reintente
     res.status(200).send('OK');
   } catch (error) {
-    console.error('Error al procesar webhook:', error);
-    res.status(500).send('Error');
+    next(error);
   }
 });
 
 // Local simulation endpoint for manual payment confirmation (testing without webhook tunnel)
-app.post('/api/orders/:id/simulate-payment', async (req, res) => {
+app.post('/api/orders/:id/simulate-payment', requireAuth, requireRole('POS_DEVICE'), async (req, res) => {
   try {
+    if (env.NODE_ENV === 'production' || !env.ENABLE_PAYMENT_SIMULATION) {
+      res.status(404).json({ error: { code: 'NOT_FOUND', message: 'La ruta solicitada no existe.' }, requestId: req.requestId });
+      return;
+    }
     const { id } = req.params;
-    const formattedId = id.startsWith('#') ? id : `#${id}`;
-
-    await db.updateOrderStatus(formattedId, 'paid', `sim-payment-${Date.now()}`);
     const orders = await db.getOrders();
-    const paidOrder = orders.find(o => o.id === formattedId);
+    const currentOrder = orders.find(o => o.id === id);
 
-    if (!paidOrder) {
+    if (!currentOrder || currentOrder.deviceId !== req.principal!.deviceId) {
        res.status(404).json({ error: 'Pedido no encontrado.' });
        return;
     }
+    if (currentOrder.paymentStatus === 'APPROVED') {
+      res.json({ message: 'El pago simulado ya estaba registrado.', order: currentOrder, idempotentReplay: true });
+      return;
+    }
+    const committed = await db.confirmOrderPayment(id, `sim-${id}`, calculateRecipeConsumption(currentOrder.items as PricedOrderItem[]));
+    if (!committed) {
+      res.json({ message: 'El pago simulado ya estaba registrado.', order: currentOrder, idempotentReplay: true });
+      return;
+    }
+    const paidOrder = (await db.getOrders()).find(o => o.id === id)!;
 
     console.log(`[SIMULACIÓN] Pedido ${paidOrder.id} marcado como PAGADO manualmente.`);
-
-    if (paidOrder && paidOrder.paymentMethod === 'card') {
-      await db.addCashTransaction({
-        type: 'card_payment',
-        amount: paidOrder.total,
-        description: `Pago con tarjeta (Simulado) para orden ${paidOrder.id}`,
-        denominations: {}
-      });
-    }
 
     // Broadcast status to clients
     broadcast({
@@ -465,96 +674,154 @@ app.post('/api/orders/:id/simulate-payment', async (req, res) => {
 });
 
 // Clear orders endpoint (for convenience / start new day)
-app.post('/api/orders/clear', async (_req, res) => {
+app.post('/api/orders/clear', requireAuth, requireRole('ADMIN'), (_req, res) => {
+  res.status(410).json({ error: { code: 'HISTORY_IS_IMMUTABLE', message: 'Los pedidos no se borran. Usa cierre diario y filtros de historial.' } });
+});
+
+app.get('/api/cash/denominations', requireAuth, requireRole('ADMIN', 'MANAGER', 'BARISTA'), async (_req, res, next) => {
   try {
-    await db.clearOrders();
-    broadcast({ type: 'clear_all' });
-    console.log('Todos los pedidos borrados.');
-    res.json({ message: 'Todos los pedidos borrados.' });
+    res.json(await db.getCashRegister());
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Error al borrar pedidos.' });
+    next(error);
   }
 });
 
+app.post('/api/orders/discount-authorization', authLimiter, requireAuth, requireRole('POS_DEVICE'), async (req, res, next) => {
+  try {
+    const input = discountAuthorizationSchema.extend({ email: z.string().email(), password: z.string().min(6).max(128) }).parse(req.body);
+    const manager = await authService.verifyManagerCredentials(input.email, input.password);
+    const authorization = { operationId: input.operationId, type: input.type, value: input.value, reason: input.reason, authorizedBy: manager.id };
+    const token = discountAuthorization.issue(authorization);
+    await securityStore.addAudit({
+      userId: manager.id, deviceId: req.principal!.deviceId, action: 'DISCOUNT_AUTHORIZE', entity: 'ORDER_OPERATION',
+      entityId: input.operationId, after: { type: input.type, value: input.value, reason: input.reason },
+      requestId: req.requestId, ip: req.ip, timestamp: new Date().toISOString(),
+    });
+    res.status(201).json({ token, expiresInSeconds: 300 });
+  } catch (error) { next(error); }
+});
+
 // --- Admin Endpoints ---
+app.use('/api/admin', requireAuth, requireRole('ADMIN', 'MANAGER'));
+
+app.get('/api/admin/terminal', async (_req, res) => {
+  res.json({ configured: mercadoPago.isConfigured(), webhookConfigured: Boolean(env.MERCADO_PAGO_WEBHOOK_SECRET), simulation: env.NODE_ENV !== 'production' && env.ENABLE_PAYMENT_SIMULATION, terminalId: env.POINT_DEVICE_ID ?? null });
+});
+app.post('/api/admin/terminal/check', async (_req, res, next) => {
+  try { res.json({ ...await mercadoPago.checkTerminal(), verifiedAt: new Date().toISOString() }); }
+  catch (error) { next(error); }
+});
+
+app.post('/api/admin/discounts/authorize', async (req, res, next) => {
+  try {
+    const input = discountAuthorizationSchema.parse(req.body);
+    const token = discountAuthorization.issue({ ...input, authorizedBy: req.principal!.subjectId });
+    await auditSensitive(req, {
+      action: 'DISCOUNT_AUTHORIZE',
+      entity: 'ORDER_OPERATION',
+      entityId: input.operationId,
+      after: { type: input.type, value: input.value, reason: input.reason },
+    });
+    res.status(201).json({ token, expiresInSeconds: 300 });
+  } catch (error) { next(error); }
+});
+
+app.get('/api/admin/devices', async (_req, res, next) => {
+  try { res.json(await securityStore.listDevices()); } catch (error) { next(error); }
+});
+
+app.post('/api/admin/devices/:id/revoke', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const device = await securityStore.findDevice(req.params.id);
+    if (!device) throw new AppError(404, 'DEVICE_NOT_FOUND', 'Dispositivo no encontrado.');
+    const revokedAt = new Date().toISOString();
+    await securityStore.revokeDevice(device.id, revokedAt);
+    await securityStore.addAudit({ userId: req.principal!.subjectId, deviceId: device.id, action: 'DEVICE_REVOKE', entity: 'DEVICE', entityId: device.id, before: { active: device.active }, after: { active: false, revokedAt }, requestId: req.requestId, ip: req.ip, timestamp: revokedAt });
+    res.status(204).end();
+  } catch (error) { next(error); }
+});
+
+app.get('/api/admin/users', requireRole('ADMIN'), async (_req, res, next) => {
+  try { res.json(await authService.listUsers()); } catch (error) { next(error); }
+});
+
+app.post('/api/admin/users', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const user = await authService.createUser(userCreateSchema.parse(req.body));
+    await auditSensitive(req, { action: 'USER_CHANGE', entity: 'USER', entityId: user.id, after: user });
+    res.status(201).json(user);
+  } catch (error) { next(error); }
+});
+
+app.patch('/api/admin/users/:email', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const email = decodeURIComponent(req.params.email).toLowerCase();
+    const input = userUpdateSchema.parse(req.body);
+    const before = (await authService.listUsers()).find((user) => user.email.toLowerCase() === email);
+    if (before?.id === req.principal!.subjectId && (input.active === false || (input.role && input.role !== 'ADMIN'))) {
+      throw new AppError(409, 'CANNOT_DEMOTE_SELF', 'No puedes desactivar ni quitar tu propio rol administrador.');
+    }
+    const user = await authService.updateUser(email, input);
+    await auditSensitive(req, { action: 'USER_CHANGE', entity: 'USER', entityId: user.id, before, after: user });
+    res.json(user);
+  } catch (error) { next(error); }
+});
 
 // Get administrative dashboard metrics
-app.get('/api/admin/metrics', async (req, res) => {
+app.get('/api/admin/metrics', async (req, res, next) => {
   try {
-    const { startDate, endDate, viewMode } = req.query;
-
-    let orders = await db.getOrders();
-    let transactions = await db.getTransactionLedger();
-    const inventory = await db.getInventory();
-    const register = await db.getCashRegister();
-
-    // Filter by dates if provided
-    if (startDate) {
-      const start = new Date(startDate as string).getTime();
-      orders = orders.filter(o => new Date(o.createdAt).getTime() >= start);
-      transactions = transactions.filter(t => new Date(t.created_at!).getTime() >= start);
-    }
-    if (endDate) {
-      const end = new Date(endDate as string).getTime();
-      orders = orders.filter(o => new Date(o.createdAt).getTime() <= end);
-      transactions = transactions.filter(t => new Date(t.created_at!).getTime() <= end);
-    }
-
-    // Cost lookup map
-    const costMap: Record<string, number> = {};
-    inventory.forEach(i => {
-      costMap[i.product_id] = i.cost;
-    });
-
-    // 1. Costos de Producción (COGS) basados en órdenes vendidas
-    const paidOrders = orders.filter(o => ['paid', 'preparing', 'ready', 'completed'].includes(o.status));
-    
-    let revenue = 0;
-    let costs = 0;
-    
-    paidOrders.forEach(o => {
-      o.items.forEach(item => {
-        const unitCost = costMap[item.product.id] || 0;
-        costs += unitCost * item.quantity;
-      });
-    });
-
-    // 2. Ingresos y Gastos desde el Historial de Transacciones (Fuente de Verdad)
-    const validTransactions = transactions.filter(t => t.status !== 'deleted');
-    validTransactions.forEach(t => {
-      if (t.type === 'payment' || t.type === 'card_payment' || t.type === 'manual_income') {
-        revenue += t.amount;
-      } else if (t.type === 'change') {
-        revenue -= t.amount;
-      } else if (t.type === 'manual_expense') {
-        costs += t.amount;
-      } else if (t.type === 'manual_investment' && viewMode === 'inversion') {
-        costs += t.amount;
-      }
-    });
-
-    // Calculate cash in register
-    const values: Record<string, number> = {
-      bill_1000: 1000, bill_500: 500, bill_200: 200, bill_100: 100, bill_50: 50, bill_20: 20,
-      coin_20: 20, coin_10: 10, coin_5: 5, coin_2: 2, coin_1: 1, coin_0_50: 0.5, coin_0_20: 0.2
-    };
-    let cashInRegister = 0;
-    Object.entries(register).forEach(([denom, count]) => {
-      cashInRegister += count * (values[denom] || 0);
-    });
-
+    const query = z.object({ startDate: z.string().datetime().optional(), endDate: z.string().datetime().optional() }).parse(req.query);
+    const [orders, transactions, movements, purchases, waste, register, inventory, cashSession] = await Promise.all([
+      db.getOrders(), db.getTransactionLedger(), db.getInventoryMovements(), db.getPurchases(), db.getWasteRecords(),
+      db.getCashRegister(), db.getRawInventory(), db.getOpenCashSession(),
+    ]);
+    const source = { orders, transactions, movements, purchases, waste };
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const weekStartDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7));
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+    const selected = buildOperationalReport({ ...source, start: query.startDate ? new Date(query.startDate).getTime() : todayStart, end: query.endDate ? new Date(query.endDate).getTime() : now.getTime() });
+    const today = buildOperationalReport({ ...source, start: todayStart, end: now.getTime() });
+    const week = buildOperationalReport({ ...source, start: weekStartDate.getTime(), end: now.getTime() });
+    const month = buildOperationalReport({ ...source, start: monthStart, end: now.getTime() });
+    const cashInRegister = totalDenominations(register);
+    const expectedCash = cashSession ? await expectedCashForSession(cashSession.openedAt, cashSession.openingAmount) : 0;
     res.json({
-      revenue,
-      costs,
-      profit: Math.max(0, revenue - costs),
-      cashInRegister,
-      transactionsCount: transactions.length
+      revenue: selected.revenue, costs: toMoney(selected.costOfGoodsSold + selected.operatingExpenses + selected.wasteCost),
+      profit: selected.operatingResult, cashInRegister, transactionsCount: transactions.length,
+      salesToday: today.revenue, salesWeek: week.revenue, salesMonth: month.revenue, tickets: selected.tickets,
+      averageTicket: selected.averageTicket, grossMargin: selected.grossMargin, grossMarginPercent: selected.grossMarginPercent,
+      cashSales: selected.cashSales, cardSales: selected.cardSales, refunds: selected.refunds, discounts: selected.discounts,
+      expectedCash, cashDifference: cashSession ? toMoney(cashInRegister - expectedCash) : 0,
+      bestProducts: selected.products.slice(0, 5),
+      lowInventory: inventory.filter((item) => item.stock <= (item.minStock ?? 0)).map((item) => ({ id: item.id, name: item.name, stock: item.stock, unit: item.unit, minStock: item.minStock ?? 0 })),
     });
-  } catch (error) {
-    console.error('Error al calcular métricas:', error);
-    res.status(500).json({ error: 'Error interno al obtener métricas.' });
-  }
+  } catch (error) { next(error); }
+});
+
+const reportRangeSchema = z.object({ startDate: z.string().datetime().optional(), endDate: z.string().datetime().optional() });
+app.get('/api/admin/reports/summary', async (req, res, next) => {
+  try {
+    const range = reportRangeSchema.parse(req.query);
+    res.json(buildOperationalReport({
+      orders: await db.getOrders(), transactions: await db.getTransactionLedger(), movements: await db.getInventoryMovements(),
+      purchases: await db.getPurchases(), waste: await db.getWasteRecords(),
+      start: range.startDate ? new Date(range.startDate).getTime() : undefined,
+      end: range.endDate ? new Date(range.endDate).getTime() : undefined,
+    }));
+  } catch (error) { next(error); }
+});
+
+app.get('/api/admin/reports/sales.csv', async (req, res, next) => {
+  try {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="rofe-ventas.csv"');
+    const range = reportRangeSchema.parse(req.query);
+    const start = range.startDate ? new Date(range.startDate).getTime() : -Infinity;
+    const end = range.endDate ? new Date(range.endDate).getTime() : Infinity;
+    const orders = (await db.getOrders()).filter((order) => { const created = new Date(order.createdAt).getTime(); return created >= start && created <= end; });
+    res.send(`\uFEFF${salesCsv(orders)}`);
+  } catch (error) { next(error); }
 });
 
 // Get cash register denominations counts
@@ -568,46 +835,97 @@ app.get('/api/admin/cash', async (_req, res) => {
   }
 });
 
-// Set starting cash or adjust register counts
-app.post('/api/admin/cash/adjust', async (req, res) => {
+app.get('/api/admin/cash/session', async (_req, res, next) => {
   try {
-    const { denominations } = req.body;
-    if (!denominations) {
-       res.status(400).json({ error: 'Faltan parámetros.' });
-       return;
-    }
+    const current = await db.getOpenCashSession();
+    res.json({ current: current ? { ...current, expectedCash: await expectedCashForSession(current.openedAt, current.openingAmount) } : undefined, history: await db.getCashSessions() });
+  } catch (error) { next(error); }
+});
 
-    await db.adjustCashRegister(denominations);
+app.post('/api/admin/cash/session/open', async (req, res, next) => {
+  try {
+    const { denominations } = z.object({ denominations: z.record(z.string(), z.number().int().min(0)) }).parse(req.body);
+    const openingAmount = totalDenominations(denominations);
+    const session = { id: randomUUID(), openingAmount, openingDenominations: denominations, openedBy: req.principal!.subjectId, openedAt: new Date().toISOString() };
+    const opened = await db.openCashSession(session);
+    if (!opened) throw new AppError(409, 'CASH_SESSION_ALREADY_OPEN', 'Ya existe una sesión de caja abierta.');
+    await auditSensitive(req, { action: 'CASH_OPEN', entity: 'CASH_SESSION', entityId: session.id, after: session });
     broadcast({ type: 'cash_updated' });
+    res.status(201).json(session);
+  } catch (error) { next(error); }
+});
 
-    res.json({ message: 'Arqueo de caja ajustado con éxito.' });
-  } catch (error) {
-    console.error('Error al ajustar caja:', error);
-    res.status(500).json({ error: 'Error al ajustar caja.' });
-  }
+async function expectedCashForSession(openedAt: string, openingAmount: number): Promise<number> {
+  const entries = (await db.getTransactionLedger()).filter((entry) => entry.created_at && new Date(entry.created_at).getTime() >= new Date(openedAt).getTime() && entry.status !== 'deleted');
+  return toMoney(entries.reduce((total, entry) => {
+    if (entry.type === 'payment' || entry.type === 'manual_income') return total + entry.amount;
+    if (entry.type === 'change' || entry.type === 'manual_expense' || entry.type === 'manual_investment' || entry.type === 'refund') return total - entry.amount;
+    return total;
+  }, openingAmount));
+}
+
+app.post('/api/admin/cash/session/close', async (req, res, next) => {
+  try {
+    const { denominations, notes } = z.object({ denominations: z.record(z.string(), z.number().int().min(0)), notes: z.string().trim().max(500).optional() }).parse(req.body);
+    const session = await db.getOpenCashSession();
+    if (!session) throw new AppError(409, 'CASH_SESSION_REQUIRED', 'No hay una sesión de caja abierta.');
+    const expectedCash = await expectedCashForSession(session.openedAt, session.openingAmount);
+    const countedCash = totalDenominations(denominations);
+    const close = { expectedCash, countedCash, difference: toMoney(countedCash - expectedCash), closingDenominations: denominations, closedBy: req.principal!.subjectId, closedAt: new Date().toISOString() };
+    const stats = await calculateClosureStats();
+    const report = buildOperationalReport({
+      orders: await db.getOrders(), transactions: await db.getTransactionLedger(), movements: await db.getInventoryMovements(),
+      purchases: await db.getPurchases(), waste: await db.getWasteRecords(), start: new Date(session.openedAt).getTime(), end: new Date(close.closedAt).getTime(),
+    });
+    const closure = {
+      id: randomUUID(), closed_at: close.closedAt, total_sales: report.revenue, total_income: report.otherIncome,
+      total_costs: toMoney(report.costOfGoodsSold + report.operatingExpenses + report.wasteCost), net_profit: report.operatingResult,
+      cash_start: session.openingAmount, cash_end: countedCash, products_sold: stats.products_sold, notes,
+      period_start: session.openedAt, period_end: close.closedAt, cash_sales: report.cashSales, card_sales: report.cardSales,
+      refunds: report.refunds, discounts: report.discounts, cost_of_goods: report.costOfGoodsSold, expenses: report.operatingExpenses,
+      gross_margin: report.grossMargin, operating_result: report.operatingResult, expected_cash: expectedCash,
+      counted_cash: countedCash, difference: close.difference, tickets: report.tickets, closed_by: req.principal!.subjectId,
+    };
+    const closed = await db.closeCashSessionWithClosing(session.id, close, closure);
+    if (!closed) throw new AppError(409, 'CASH_SESSION_ALREADY_CLOSED', 'La sesión de caja ya estaba cerrada.');
+    await auditSensitive(req, { action: 'CASH_CLOSE', entity: 'CASH_SESSION', entityId: session.id, before: session, after: close });
+    broadcast({ type: 'cash_updated' });
+    res.json({ ...session, ...close });
+  } catch (error) { next(error); }
+});
+
+// Direct count overwrites destroy reconciliation history. Counts are accepted only at open/close.
+app.post('/api/admin/cash/adjust', (_req, _res, next) => {
+  next(new AppError(410, 'USE_CASH_SESSION', 'Usa apertura, movimientos y cierre de caja auditables.'));
 });
 
 // Record a manual cash movement (Income / Expense)
-app.post('/api/admin/cash/transaction', async (req, res) => {
+app.post('/api/admin/cash/transaction', async (req, res, next) => {
   try {
-    const { type, amount, description, denominations } = req.body;
-    if (!type || amount === undefined || !description) {
-       res.status(400).json({ error: 'Faltan parámetros obligatorios.' });
-       return;
-    }
+    const { type, amount, description, denominations, operationId } = z.object({
+      type: z.enum(['manual_income', 'manual_expense', 'manual_investment']),
+      amount: z.number().positive().max(1_000_000),
+      description: z.string().trim().min(3).max(240),
+      denominations: z.record(z.string(), z.number().int().min(0)).default({}),
+      operationId: z.string().uuid(),
+    }).parse(req.body);
+    if (Math.abs(totalDenominations(denominations) - amount) > 0.001) throw new AppError(400, 'CASH_TOTAL_MISMATCH', 'Desglosa el efectivo del movimiento; las denominaciones deben sumar el importe.');
+    if (!await db.getOpenCashSession()) throw new AppError(409, 'CASH_SESSION_REQUIRED', 'Abre caja antes de registrar movimientos en efectivo.');
 
     await db.addCashTransaction({
       type: type as 'manual_income' | 'manual_expense' | 'manual_investment',
       amount,
       description,
-      denominations: denominations || {}
+      denominations: denominations || {},
+      operationId,
+      createdBy: req.principal!.subjectId,
     });
+    await auditSensitive(req, { action: 'CASH_MOVEMENT', entity: 'CASH_TRANSACTION', after: { type, amount, description, denominations: denominations || {} } });
     broadcast({ type: 'cash_updated' });
 
     res.json({ message: 'Movimiento de caja registrado con éxito.' });
   } catch (error) {
-    console.error('Error al registrar transacción:', error);
-    res.status(500).json({ error: 'Error al registrar transacción.' });
+    next(error);
   }
 });
 
@@ -634,67 +952,53 @@ app.get('/api/admin/transactions', async (req, res) => {
 });
 
 // Audit a cash transaction (modify or delete)
-app.post('/api/admin/transactions/:id/audit', async (req, res) => {
+app.post('/api/admin/transactions/:id/audit', async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { status, auditReason, newAmount } = req.body;
+    const { status, auditReason, newAmount } = z.object({
+      status: z.enum(['deleted', 'modified']),
+      auditReason: z.string().trim().min(5).max(240),
+      newAmount: z.number().positive().max(1_000_000).optional(),
+    }).parse(req.body);
+    if (status === 'modified' && newAmount === undefined) throw new AppError(400, 'NEW_AMOUNT_REQUIRED', 'Indica el importe corregido.');
 
-    if (!status || !auditReason) {
-       res.status(400).json({ error: 'Faltan parámetros de auditoría (status, auditReason).' });
-       return;
-    }
-
-    await db.updateCashTransaction(parseInt(id, 10), status, auditReason, newAmount);
-    broadcast({ type: 'cash_updated' });
-    res.json({ message: 'Movimiento auditado con éxito.' });
-  } catch (error) {
-    console.error('Error al auditar transacción:', error);
-    res.status(500).json({ error: 'Error al auditar.' });
-  }
-});
-
-// Get bakery batches
-app.get('/api/admin/bakery-batches', async (_req, res) => {
-  try {
-    const batches = await db.getBakeryBatches();
-    res.json(batches);
-  } catch (error) {
-    console.error('Error al obtener lotes de panadería:', error);
-    res.status(500).json({ error: 'Error al obtener lotes.' });
-  }
-});
-
-// Add bakery batch
-app.post('/api/admin/bakery-batches', async (req, res) => {
-  try {
-    const { productId, quantity } = req.body;
-    if (!productId || !quantity) {
-      res.status(400).json({ error: 'Faltan parámetros (productId, quantity).' });
-      return;
-    }
-
-    const addedAt = new Date();
-    const expiresAt = new Date(addedAt.getTime() + 48 * 60 * 60 * 1000); // 48 hours later
-
-    await db.addBakeryBatch({
-      product_id: productId,
-      quantity,
-      added_at: addedAt.toISOString(),
-      expires_at: expiresAt.toISOString()
+    const transaction = (await db.getTransactionLedger()).find((entry) => entry.id === Number(id));
+    if (!transaction) throw new AppError(404, 'TRANSACTION_NOT_FOUND', 'Movimiento no encontrado.');
+    const isIncome = ['payment', 'card_payment', 'manual_income'].includes(transaction.type);
+    const reverseType = isIncome ? 'manual_expense' : 'manual_income';
+    const replacementType = isIncome ? 'manual_income' : 'manual_expense';
+    await db.addCashTransaction({
+      type: reverseType,
+      amount: transaction.amount,
+      description: `Reverso de movimiento #${id}: ${auditReason}`,
+      denominations: {},
+      operationId: randomUUID(),
+      createdBy: req.principal!.subjectId,
     });
-    
-    // Auto-update inventory as well
-    const inventory = await db.getInventory();
-    const currentItem = inventory.find(i => i.product_id === productId);
-    const newStock = (currentItem?.stock || 0) + quantity;
-    await db.updateInventory(productId, newStock, currentItem?.cost || 0);
-
-    broadcast({ type: 'inventory_updated' });
-    res.json({ message: 'Lote de panadería registrado.' });
+    if (status === 'modified' && newAmount !== undefined) {
+      await db.addCashTransaction({
+        type: replacementType,
+        amount: newAmount,
+        description: `Corrección de movimiento #${id}: ${auditReason}`,
+        denominations: {},
+        operationId: randomUUID(),
+        createdBy: req.principal!.subjectId,
+      });
+    }
+    await auditSensitive(req, { action: 'CASH_ADJUSTMENT', entity: 'CASH_TRANSACTION', entityId: id, before: transaction, after: { correction: status, auditReason, newAmount, immutableOriginal: true } });
+    broadcast({ type: 'cash_updated' });
+    res.json({ message: 'Corrección compensatoria registrada; el movimiento original se conservó.' });
   } catch (error) {
-    console.error('Error al registrar lote:', error);
-    res.status(500).json({ error: 'Error al registrar lote.' });
+    next(error);
   }
+});
+
+app.get('/api/admin/bakery-batches', (_req, _res, next) => {
+  next(new AppError(410, 'USE_PRODUCTION_API', 'Usa /api/admin/production para lotes con receta, costo e idempotencia.'));
+});
+
+app.post('/api/admin/bakery-batches', (_req, _res, next) => {
+  next(new AppError(410, 'USE_PRODUCTION_API', 'Usa /api/admin/production para lotes con receta, costo e idempotencia.'));
 });
 
 app.get('/api/admin/inventory', async (_req, res) => {
@@ -708,115 +1012,12 @@ app.get('/api/admin/inventory', async (_req, res) => {
 });
 
 // Update product stock and cost (Legacy)
-app.post('/api/admin/inventory', async (req, res) => {
-  try {
-    const { productId, stock, cost } = req.body;
-    if (!productId || stock === undefined || cost === undefined) {
-      res.status(400).json({ error: 'Faltan parámetros.' });
-      return;
-    }
-
-    await db.updateInventory(productId, stock, cost);
-    broadcast({ type: 'inventory_updated' });
-
-    res.json({ message: 'Inventario actualizado con éxito.' });
-  } catch (error) {
-    console.error('Error al actualizar inventario:', error);
-    res.status(500).json({ error: 'Error al actualizar inventario.' });
-  }
+app.post('/api/admin/inventory', (_req, _res, next) => {
+  next(new AppError(410, 'USE_PRODUCTION_API', 'El inventario terminado se modifica mediante producción auditable.'));
 });
 
 // --- NEW V2 ENDPOINTS ---
-// Image Upload
-app.post('/api/upload-image', express.json({ limit: '10mb' }), async (req, res) => {
-  try {
-    const { fileBase64, fileName, mimeType } = req.body;
-    if (!fileBase64 || !fileName) {
-      return res.status(400).json({ error: 'Faltan datos de la imagen' });
-    }
-
-    const buffer = Buffer.from(fileBase64, 'base64');
-    
-    // Asumimos que db tiene acceso a la instancia de supabase si es SupabaseDbAdapter
-    // Dado que db.ts abstrae esto, podemos añadir una función en DbAdapter o manejarlo directamente
-    // si exportamos supabase desde algun lado. Pero vamos a añadir la función a db.ts
-    const url = await db.uploadProductImage(fileName, buffer, mimeType);
-    res.json({ url });
-  } catch (error) {
-    console.error('Error uploading image:', error);
-    res.status(500).json({ error: 'Error al subir la imagen' });
-  }
-});
-
-app.get('/api/products', async (_req, res) => {
-  try {
-    const products = await db.getProducts();
-    res.json(products);
-  } catch (error) {
-    console.error('Error al obtener productos:', error);
-    res.status(500).json({ error: 'Error al obtener productos.' });
-  }
-});
-
-app.post('/api/products', async (req, res) => {
-  try {
-    await db.createProduct(req.body);
-    broadcast({ type: 'inventory_updated' });
-    res.status(201).json({ message: 'Producto creado' });
-  } catch (error) {
-    console.error('Error al crear producto:', error);
-    res.status(500).json({ error: 'Error al crear producto' });
-  }
-});
-
-app.put('/api/products/:id', async (req, res) => {
-  try {
-    await db.updateProduct(req.params.id, req.body);
-    broadcast({ type: 'inventory_updated' });
-    res.json({ message: 'Producto actualizado' });
-  } catch (error) {
-    console.error('Error al actualizar producto:', error);
-    res.status(500).json({ error: 'Error al actualizar producto' });
-  }
-});
-
-app.delete('/api/products/:id', async (req, res) => {
-  try {
-    await db.deleteProduct(req.params.id);
-    broadcast({ type: 'inventory_updated' });
-    res.json({ message: 'Producto eliminado' });
-  } catch (error) {
-    console.error('Error al eliminar producto:', error);
-    res.status(500).json({ error: 'Error al eliminar producto' });
-  }
-});
-
-app.post('/api/products/price', async (req, res) => {
-  try {
-    const { id, price } = req.body;
-    await db.updateProductPrice(id, price);
-    broadcast({ type: 'inventory_updated' });
-    res.json({ message: 'Precio actualizado con éxito.' });
-  } catch (error) {
-    res.status(500).json({ error: 'Error al actualizar precio.' });
-  }
-});
-
-app.post('/api/products/recipe', async (req, res) => {
-  try {
-    const { productId, recipe } = req.body;
-    if (!productId || !recipe) {
-      res.status(400).json({ error: 'Faltan parámetros.' });
-      return;
-    }
-    await db.updateProductRecipe(productId, recipe);
-    broadcast({ type: 'inventory_updated' });
-    res.json({ message: 'Receta actualizada con éxito.' });
-  } catch (error) {
-    console.error('Error al actualizar receta:', error);
-    res.status(500).json({ error: 'Error al actualizar receta.' });
-  }
-});
+registerCatalogRoutes(app, { env, requireAuth, audit: auditSensitive, broadcast });
 
 app.get('/api/admin/raw-inventory', async (_req, res) => {
   try {
@@ -827,195 +1028,275 @@ app.get('/api/admin/raw-inventory', async (_req, res) => {
   }
 });
 
-app.post('/api/admin/raw-inventory', async (req, res) => {
+app.get('/api/admin/inventory-movements', async (_req, res, next) => {
+  try { res.json(await db.getInventoryMovements()); } catch (error) { next(error); }
+});
+
+app.get('/api/admin/suppliers', async (_req, res, next) => {
+  try { res.json(await db.getSuppliers()); } catch (error) { next(error); }
+});
+
+app.post('/api/admin/suppliers', async (req, res, next) => {
   try {
-    const { id, stock, cost } = req.body;
-    await db.updateRawInventory(id, stock, cost);
+    const input = supplierSchema.parse(req.body);
+    const supplier = { id: randomUUID(), ...input, active: true, createdAt: new Date().toISOString() };
+    await db.createSupplier(supplier);
+    await auditSensitive(req, { action: 'SUPPLIER_CHANGE', entity: 'SUPPLIER', entityId: supplier.id, after: supplier });
+    res.status(201).json(supplier);
+  } catch (error) { next(error); }
+});
+
+app.get('/api/admin/purchases', async (_req, res, next) => {
+  try { res.json(await db.getPurchases()); } catch (error) { next(error); }
+});
+
+app.post('/api/admin/purchases', async (req, res, next) => {
+  try {
+    const input = purchaseSchema.parse(req.body);
+    const existing = (await db.getPurchases()).find((entry) => entry.operationId === input.operationId);
+    if (existing) { res.json({ purchase: existing, idempotentReplay: true }); return; }
+    const duplicateIngredients = new Set<string>();
+    for (const line of input.items) {
+      if (duplicateIngredients.has(line.ingredientId)) throw new AppError(400, 'DUPLICATE_PURCHASE_LINE', 'Cada insumo debe aparecer una sola vez por compra.');
+      duplicateIngredients.add(line.ingredientId);
+    }
+    const inventory = await db.getRawInventory();
+    const inventoryMap = new Map(inventory.map((item) => [item.id, item]));
+    const items = input.items.map((line) => {
+      const ingredient = inventoryMap.get(line.ingredientId);
+      if (!ingredient) throw new AppError(404, 'INVENTORY_ITEM_NOT_FOUND', `No existe el insumo ${line.ingredientId}.`);
+      const subtotal = toMoney(line.quantity * line.unitCost);
+      return { ...line, unit: ingredient.unit, unitCost: Math.round(line.unitCost * 1_000_000) / 1_000_000, subtotal };
+    });
+    if (input.supplierId && !(await db.getSuppliers()).some((supplier) => supplier.id === input.supplierId && supplier.active)) {
+      throw new AppError(404, 'SUPPLIER_NOT_FOUND', 'Proveedor no encontrado o inactivo.');
+    }
+    const purchase = {
+      id: randomUUID(),
+      ...input,
+      total: toMoney(items.reduce((sum, item) => sum + item.subtotal, 0)),
+      purchasedAt: new Date().toISOString(),
+      createdBy: req.principal!.subjectId,
+      items,
+    };
+    if (purchase.paymentMethod === 'cash') {
+      if (!await db.getOpenCashSession()) throw new AppError(409, 'CASH_SESSION_REQUIRED', 'Abre caja antes de pagar una compra en efectivo.');
+      if (Math.abs(totalDenominations(purchase.cashDenominations ?? {}) - purchase.total) > 0.001) throw new AppError(400, 'CASH_TOTAL_MISMATCH', 'Desglosa el efectivo de la compra; debe sumar el costo total.');
+    }
+    const inserted = await db.recordPurchase(purchase);
+    const persisted = inserted ? purchase : (await db.getPurchases()).find((entry) => entry.operationId === input.operationId);
+    await auditSensitive(req, { action: 'INVENTORY_PURCHASE', entity: 'PURCHASE', entityId: persisted?.id, after: persisted });
     broadcast({ type: 'inventory_updated' });
-    res.json({ message: 'Insumo actualizado con éxito.' });
+    res.status(inserted ? 201 : 200).json({ purchase: persisted, idempotentReplay: !inserted });
+  } catch (error) { next(error); }
+});
+
+app.get('/api/admin/waste', async (_req, res, next) => {
+  try { res.json(await db.getWasteRecords()); } catch (error) { next(error); }
+});
+
+app.post('/api/admin/waste', async (req, res, next) => {
+  try {
+    const input = wasteSchema.parse(req.body);
+    const record = { id: randomUUID(), ...input, costSnapshot: 0, userId: req.principal!.subjectId, createdAt: new Date().toISOString() };
+    const inserted = await db.recordWaste(record);
+    const persisted = inserted ? (await db.getWasteRecords()).find((entry) => entry.operationId === input.operationId) : (await db.getWasteRecords()).find((entry) => entry.operationId === input.operationId);
+    await auditSensitive(req, { action: 'INVENTORY_WASTE', entity: 'WASTE', entityId: persisted?.id, after: persisted });
+    broadcast({ type: 'inventory_updated' });
+    res.status(inserted ? 201 : 200).json({ waste: persisted, idempotentReplay: !inserted });
   } catch (error) {
-    res.status(500).json({ error: 'Error al actualizar insumo.' });
+    const message = error instanceof Error ? error.message : '';
+    if (message.includes('insufficient_inventory')) return next(new AppError(409, 'INSUFFICIENT_INVENTORY', 'No hay inventario suficiente para registrar la merma.'));
+    next(error);
   }
 });
 
-app.post('/api/admin/raw-inventory/add-item', async (req, res) => {
+app.get('/api/admin/production', async (_req, res, next) => {
+  try { res.json(await db.getProductionBatches()); } catch (error) { next(error); }
+});
+
+app.post('/api/admin/production', async (req, res, next) => {
   try {
-    const { id, name, unit, stock, cost } = req.body;
-    if (!id || !name || !unit) {
-      res.status(400).json({ error: 'Faltan parámetros básicos (id, name, unit).' });
-      return;
-    }
+    const input = productionSchema.parse(req.body);
+    const products = await db.getProducts();
+    const product = products.find((entry) => entry.id === input.productId);
+    if (!product) throw new AppError(404, 'PRODUCT_NOT_FOUND', 'Producto no encontrado.');
+    if (!product.recipe || Object.keys(product.recipe).length === 0) throw new AppError(409, 'RECIPE_REQUIRED', 'Configura la receta antes de registrar producción.');
+    const priced = priceOrder(products, [{
+      productId: product.id,
+      quantity: input.quantityProduced,
+      customization: { size: 'regular' as const, milk: 'none' as const, sweetness: 'none' as const, temp: 'hot' as const, extraShot: false },
+    }]);
+    const batch = {
+      id: randomUUID(), ...input, totalCost: 0, responsibleUserId: req.principal!.subjectId,
+      producedAt: new Date().toISOString(), consumption: calculateRecipeConsumption(priced.items),
+    };
+    const inserted = await db.recordProductionBatch(batch);
+    const persisted = (await db.getProductionBatches()).find((entry) => entry.operationId === input.operationId);
+    await auditSensitive(req, { action: 'PRODUCTION_BATCH', entity: 'PRODUCTION_BATCH', entityId: persisted?.id, after: persisted });
+    broadcast({ type: 'inventory_updated' });
+    res.status(inserted ? 201 : 200).json({ batch: persisted, idempotentReplay: !inserted });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/admin/raw-inventory', async (req, res, next) => {
+  next(new AppError(410, 'USE_AUDITED_ADJUSTMENT', 'Usa el endpoint de ajuste auditable por insumo.'));
+});
+
+app.post('/api/admin/raw-inventory/:id/adjust', async (req, res, next) => {
+  try {
+    const input = z.object({
+      stock: z.number().min(0).max(1_000_000_000),
+      cost: z.number().min(0).max(1_000_000_000),
+      reason: z.string().trim().min(5).max(240),
+      operationId: z.string().uuid(),
+    }).parse(req.body);
+    const id = z.string().min(1).max(100).parse(req.params.id);
+    const before = (await db.getRawInventory()).find((item) => item.id === id);
+    if (!before) throw new AppError(404, 'INVENTORY_ITEM_NOT_FOUND', 'Insumo no encontrado.');
+    const inserted = await db.adjustRawInventory({ id, ...input, userId: req.principal!.subjectId });
+    const after = (await db.getRawInventory()).find((item) => item.id === id);
+    await auditSensitive(req, { action: 'INVENTORY_ADJUSTMENT', entity: 'RAW_INVENTORY', entityId: id, before, after: { ...after, reason: input.reason } });
+    broadcast({ type: 'inventory_updated' });
+    res.json({ inventory: after, idempotentReplay: !inserted });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/admin/raw-inventory/add-item', async (req, res, next) => {
+  try {
+    const { id, name, unit, stock, cost } = z.object({
+      id: z.string().regex(/^[a-z0-9_-]+$/).max(100),
+      name: z.string().trim().min(2).max(160),
+      unit: z.enum(['kg', 'g', 'L', 'ml', 'piece', 'pieza', 'un']),
+      stock: z.number().min(0).default(0),
+      cost: z.number().min(0).default(0),
+    }).parse(req.body);
+    if (stock !== 0 || cost !== 0) throw new AppError(409, 'INITIAL_STOCK_REQUIRES_PURCHASE', 'Crea el insumo en cero y registra la existencia inicial como compra.');
     await db.createRawInventoryItem({
       id, name, unit,
       stock: stock || 0,
       cost: cost || 0
     });
+    await auditSensitive(req, { action: 'INVENTORY_ADJUSTMENT', entity: 'RAW_INVENTORY', entityId: id, after: { id, name, unit, stock: stock || 0, cost: cost || 0 } });
     
-    // If the initial creation includes a cost > 0, we could log it, but let's assume
-    // adding an item initially might be just setting up the system unless requested.
-    // Actually, user said: "iniciará en ceros todo. Necesito que cada cosa que agregue de ingredientes/insumos, se agregue a costos/egresos."
-    // So if they add initial stock/cost, we should log it.
-    if (cost > 0) {
-      await db.addCashTransaction({
-        type: 'manual_expense',
-        amount: cost,
-        description: `Compra inicial de insumo: ${name} (${stock} ${unit})`,
-        denominations: {}
-      });
-    }
-
     broadcast({ type: 'inventory_updated' });
     res.json({ message: 'Insumo creado con éxito.' });
   } catch (error) {
-    console.error('Error al crear insumo:', error);
-    res.status(500).json({ error: 'Error al crear insumo.' });
+    next(error);
   }
 });
 
-app.post('/api/admin/raw-inventory/purchase', async (req, res) => {
-  try {
-    const { id, addedStock, addedCost } = req.body;
-    if (!id || addedStock === undefined || addedCost === undefined) {
-      res.status(400).json({ error: 'Faltan parámetros.' });
-      return;
-    }
-
-    const inv = await db.getRawInventory();
-    const item = inv.find(i => i.id === id);
-    if (!item) {
-      res.status(404).json({ error: 'Insumo no encontrado.' });
-      return;
-    }
-
-    const newStock = item.stock + addedStock;
-    const newCost = item.cost + addedCost;
-
-    await db.updateRawInventory(id, newStock, newCost);
-
-    if (addedCost > 0) {
-      await db.addCashTransaction({
-        type: 'manual_expense',
-        amount: addedCost,
-        description: `Compra de insumo: ${item.name} (+${addedStock} ${item.unit})`,
-        denominations: {}
-      });
-    }
-
-    broadcast({ type: 'inventory_updated' });
-    res.json({ message: 'Compra registrada con éxito.' });
-  } catch (error) {
-    console.error('Error al registrar compra:', error);
-    res.status(500).json({ error: 'Error al registrar compra.' });
-  }
+app.post('/api/admin/raw-inventory/purchase', (_req, res) => {
+  res.status(410).json({ error: { code: 'USE_PURCHASES_API', message: 'Este flujo fue reemplazado por /api/admin/purchases para garantizar movimientos e idempotencia.' } });
 });
-
-// Initialize database and start server
-db.initialize().then(() => {
-  
 
 // --- CORTE DE CAJA ---
 
-app.get('/api/admin/closures/stats', async (req, res) => {
-  try {
-    const closures = await db.getDailyClosures();
-    const lastClosureDate = closures.length > 0 ? new Date(closures[0].closed_at).getTime() : 0;
-    
-    // Get all orders since last closure
-    const allOrders = await db.getOrders();
-    const ordersSinceLastClosure = allOrders.filter(o => 
-      new Date(o.createdAt).getTime() > lastClosureDate && 
-      o.status !== 'cancelled' && o.status !== 'rejected'
-    );
-    
-    let total_sales = 0;
-    const products_sold: Record<string, number> = {};
-    ordersSinceLastClosure.forEach(o => {
-      total_sales += o.total;
-      o.items.forEach((item: any) => {
-        products_sold[item.product.name] = (products_sold[item.product.name] || 0) + item.quantity;
-      });
-    });
+async function calculateClosureStats() {
+  const closures = await db.getDailyClosures();
+  const lastClosureDate = closures.length > 0 ? new Date(closures[0].closed_at).getTime() : 0;
+  const paidStatuses = new Set(['PAID', 'IN_PREPARATION', 'READY', 'COMPLETED', 'paid', 'preparing', 'ready', 'completed']);
+  const orders = (await db.getOrders()).filter((order) =>
+    new Date(order.createdAt).getTime() > lastClosureDate && paidStatuses.has(order.status));
+  const transactions = (await db.getTransactionLedger()).filter((transaction) =>
+    transaction.created_at && new Date(transaction.created_at).getTime() > lastClosureDate && transaction.status !== 'deleted');
 
-    // Get all transactions since last closure
-    const allTx = await db.getTransactionLedger();
-    const txSinceLastClosure = allTx.filter(t => 
-      t.created_at && new Date(t.created_at).getTime() > lastClosureDate && t.status !== 'deleted'
-    );
-    
-    let total_costs = 0;
-    let total_income = 0;
-    txSinceLastClosure.forEach(t => {
-      if (t.type === 'manual_expense') total_costs += t.amount;
-      if (t.type === 'manual_income') total_income += t.amount;
-    });
-
-    // Net Profit
-    // Income doesn't just include manual_income, it must include total_sales (the cash/card earnings)
-    const net_profit = (total_sales + total_income) - total_costs;
-
-    // Current Cash in register
-    const cashReg = await db.getCashRegister();
-    const values: Record<string, number> = {
-      bill_1000: 1000, bill_500: 500, bill_200: 200, bill_100: 100, bill_50: 50, bill_20: 20,
-      coin_20: 20, coin_10: 10, coin_5: 5, coin_2: 2, coin_1: 1, coin_0_50: 0.5, coin_0_20: 0.2
-    };
-    let cash_end = 0;
-    Object.entries(cashReg).forEach(([denom, count]) => {
-      cash_end += count * (values[denom] || 0);
-    });
-    
-    const cash_start = closures.length > 0 ? closures[0].cash_end : 0;
-
-    res.json({
-      last_closure_at: closures.length > 0 ? closures[0].closed_at : null,
-      total_sales,
-      total_income,
-      total_costs,
-      net_profit,
-      cash_start,
-      cash_end,
-      products_sold
-    });
-  } catch (error) {
-    console.error('Error fetching closure stats:', error);
-    res.status(500).json({ error: 'Error interno del servidor.' });
-  }
-});
-
-app.post('/api/admin/closures', async (req, res) => {
-  try {
-    const closureData = req.body;
-    const denomsLeft = closureData.denominations_left;
-    delete closureData.denominations_left;
-
-    closureData.closed_at = new Date().toISOString();
-    await db.createDailyClosure(closureData);
-
-    if (denomsLeft) {
-      await db.adjustCashRegister(denomsLeft);
+  const products_sold: Record<string, number> = {};
+  const total_sales = orders.reduce((sum, order) => {
+    for (const item of order.items) {
+      const name = item.product?.name || item.productName || item.productId || 'Producto';
+      products_sold[name] = (products_sold[name] || 0) + Number(item.quantity || 0);
     }
+    return sum + Number(order.total);
+  }, 0);
+  const total_income = transactions.filter((entry) => entry.type === 'manual_income').reduce((sum, entry) => sum + entry.amount, 0);
+  const total_costs = transactions.filter((entry) => entry.type === 'manual_expense').reduce((sum, entry) => sum + entry.amount, 0);
+  const cash_end = totalDenominations(await db.getCashRegister());
 
-    res.json({ message: 'Corte de caja registrado exitosamente.' });
-  } catch (error) {
-    res.status(500).json({ error: 'Error al registrar corte de caja.' });
-  }
+  return {
+    last_closure_at: closures[0]?.closed_at ?? null,
+    total_sales,
+    total_income,
+    total_costs,
+    net_profit: total_sales + total_income - total_costs,
+    cash_start: closures[0]?.cash_end ?? 0,
+    cash_end,
+    products_sold,
+  };
+}
+
+app.get('/api/admin/closures/stats', async (_req, res, next) => {
+  try { res.json(await calculateClosureStats()); } catch (error) { next(error); }
 });
 
-app.get('/api/admin/closures', async (req, res) => {
+app.post('/api/admin/closures', (_req, res) => {
+  res.status(410).json({ error: { code: 'USE_CASH_SESSION', message: 'Usa /api/admin/cash/session/close para cerrar una sesión auditable.' } });
+});
+
+app.get('/api/admin/closures', async (_req, res, next) => {
   try {
     const closures = await db.getDailyClosures();
     res.json(closures);
   } catch (error) {
-    res.status(500).json({ error: 'Error obteniendo cierres de caja.' });
+    next(error);
   }
 });
 
-app.listen(PORT, () => {
-    console.log(`Servidor POS corriendo en puerto ${PORT}`);
+app.use(notFoundHandler);
+app.use(errorHandler);
+
+export { app };
+
+async function start(): Promise<void> {
+  await db.initialize();
+  await authService.initialize();
+  const server = app.listen(PORT, () => {
+    console.log(JSON.stringify({ level: 'info', event: 'server_started', port: PORT, environment: env.NODE_ENV }));
   });
-}).catch(err => {
-  console.error('Error crítico al inicializar la base de datos:', err);
-  app.listen(PORT, () => {
-    console.log(`Servidor POS corriendo en puerto ${PORT} (fallback sin DB)`);
+
+  let sweeping = false;
+  const reconcilePendingPickup = async () => {
+    if (sweeping || !stripePickup.configured()) return;
+    sweeping = true;
+    try {
+      for (const order of await db.getPendingPickupOrders()) {
+        try {
+          const result = await refreshPickupOrder(stripePickup, order);
+          if (result.changed) {
+            broadcast({ type: 'order_updated', orderId: result.order.id, order: result.order });
+            broadcast({ type: 'inventory_updated' });
+          } else if (!result.order.paymentIntentId && Date.now() > Date.parse(order.pickup!.expiresAt) + 60_000) {
+            await cancelPickupOrder(stripePickup, result.order);
+            broadcast({ type: 'inventory_updated' });
+          }
+        } catch { console.error(JSON.stringify({ level: 'error', event: 'pickup_reconciliation_failed', orderId: order.id })); }
+      }
+    } catch { console.error(JSON.stringify({ level: 'error', event: 'pickup_sweep_failed' })); }
+    finally { sweeping = false; }
+  };
+  const pickupTimer = setInterval(() => void reconcilePendingPickup(), 60_000);
+  pickupTimer.unref();
+  void reconcilePendingPickup();
+
+  const shutdown = (signal: string) => {
+    clearInterval(pickupTimer);
+    console.log(JSON.stringify({ level: 'info', event: 'server_stopping', signal }));
+    for (const client of clients) client.response.end();
+    server.close((error) => {
+      if (error) {
+        console.error(JSON.stringify({ level: 'error', event: 'server_shutdown_failed', message: error.message }));
+        process.exitCode = 1;
+      }
+    });
+    setTimeout(() => process.exit(1), 10_000).unref();
+  };
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT'));
+}
+
+if (env.NODE_ENV !== 'test') {
+  start().catch((error: unknown) => {
+    console.error(JSON.stringify({ level: 'error', event: 'startup_failed', message: error instanceof Error ? error.message : String(error) }));
+    process.exitCode = 1;
   });
-});
+}

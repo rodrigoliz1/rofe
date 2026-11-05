@@ -1,0 +1,84 @@
+
+:root {
+  /* === Color System — Deep Warm Dark === */
+  --bg-primary: #0a0a0c;
+  --bg-secondary: #111114;
+  --bg-tertiary: #1a1a1f;
+  --bg-elevated: #16161a;
+  --bg-surface: #1e1e24;
+  --bg-overlay: #24242b;
+
+  --text-primary: #f5f0e8;
+  --text-secondary: #9a948c;
+  --text-muted: #5c5650;
+
+  --border-color: #25252c;
+  --border-active: #f5f0e8;
+
+  --accent-color: #f5f0e8;
+  --accent-dot: #9a948c;
+  --accent-warm: #d4a853;
+  --accent-rose: #c97a6a;
+
+  --status-success: #30d158;
+  --status-error: #ff453a;
+  --status-pending: #ffd60a;
+  --status-info: #5b9bd5;
+
+  /* === Typography === */
+  --font-logo: 'Bricolage Grotesque', sans-serif;
+  --font-body: 'Outfit', sans-serif;
+
+  /* === Spacing Scale === */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* === Radii === */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+  --radius-2xl: 28px;
+  --radius-full: 9999px;
+
+  /* === Shadows === */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.6);
+  --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.7);
+
+  /* === Motion === */
+  --spring-default: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --spring-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --duration-fast: 120ms;
+  --duration-normal: 220ms;
+  --duration-slow: 350ms;
+  --duration-page: 400ms;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+

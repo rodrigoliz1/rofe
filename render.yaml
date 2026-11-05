@@ -1,0 +1,48 @@
+services:
+  - type: web
+    name: rofe-api
+    runtime: node
+    plan: starter
+    buildCommand: cd backend && npm ci && npm run build
+    startCommand: cd backend && npm start
+    healthCheckPath: /ready
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TZ
+        value: America/Mexico_City
+      - key: NODE_VERSION
+        value: 22
+      - key: PORT
+        value: 3000
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: AUTH_BOOTSTRAP_ADMIN_HASH
+        sync: false
+      - key: DEVICE_ENROLLMENT_SECRET
+        generateValue: true
+      - key: MERCADO_PAGO_ACCESS_TOKEN
+        sync: false
+      - key: MERCADO_PAGO_WEBHOOK_SECRET
+        sync: false
+      - key: POINT_DEVICE_ID
+        sync: false
+      - key: ENABLE_PAYMENT_SIMULATION
+        value: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: PUBLIC_ORDERING_URL
+        sync: false
+      - key: PICKUP_ENABLED
+        value: true

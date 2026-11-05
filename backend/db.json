@@ -62,19 +62,19 @@
     }
   ],
   "cashRegister": {
-    "bill_1000": 3,
-    "bill_500": 0,
-    "bill_200": 8,
-    "bill_100": 7,
-    "bill_50": 10,
-    "bill_20": 8,
-    "coin_20": 0,
-    "coin_10": 4,
-    "coin_5": 9,
-    "coin_2": 10,
-    "coin_1": 10,
-    "coin_0_50": 10,
-    "coin_0_20": 5
+    "bill_500": 4,
+    "bill_200": 0,
+    "bill_100": 6,
+    "bill_50": 9,
+    "bill_20": 3,
+    "coin_20": 60,
+    "coin_10": 41,
+    "coin_5": 11,
+    "coin_2": 11,
+    "coin_1": 119,
+    "bill_1000": 0,
+    "coin_0_50": 0,
+    "coin_0_20": 0
   },
   "transactions": [
     {
@@ -140,6 +140,86 @@
       },
       "id": 5,
       "created_at": "2026-06-15T06:21:32.325Z"
+    },
+    {
+      "type": "card_payment",
+      "amount": 45,
+      "description": "Pago con tarjeta (Simulado) para orden 87b90617-8694-4e1e-95c9-07c57f90d331",
+      "denominations": {},
+      "id": 6,
+      "created_at": "2026-08-30T07:23:57.557Z"
+    },
+    {
+      "id": 7,
+      "type": "card_payment",
+      "amount": 57,
+      "description": "Pago con tarjeta para orden R-DF7AA05DE2",
+      "denominations": {},
+      "created_at": "2026-11-05T01:38:20.460Z"
+    },
+    {
+      "id": 8,
+      "type": "payment",
+      "amount": 500,
+      "description": "Pago en efectivo recibido para orden e2bcc984-5bc3-4647-bad7-12b93483ddf3",
+      "denominations": {
+        "bill_1000": 0,
+        "bill_500": 1
+      },
+      "created_at": "2026-11-05T01:56:51.270Z"
+    },
+    {
+      "id": 9,
+      "type": "change",
+      "amount": 455,
+      "description": "Cambio devuelto para orden e2bcc984-5bc3-4647-bad7-12b93483ddf3",
+      "denominations": {
+        "bill_200": 2,
+        "bill_50": 1,
+        "coin_5": 1
+      },
+      "created_at": "2026-11-05T01:56:51.270Z"
+    },
+    {
+      "id": 10,
+      "type": "payment",
+      "amount": 500,
+      "description": "Pago en efectivo recibido para orden 29da6580-2d71-4422-9c7e-bf72dff9dd6f",
+      "denominations": {
+        "bill_500": 1
+      },
+      "created_at": "2026-11-05T01:56:57.837Z"
+    },
+    {
+      "id": 11,
+      "type": "change",
+      "amount": 443,
+      "description": "Cambio devuelto para orden 29da6580-2d71-4422-9c7e-bf72dff9dd6f",
+      "denominations": {
+        "bill_200": 2,
+        "bill_20": 2,
+        "coin_2": 1,
+        "coin_1": 1
+      },
+      "created_at": "2026-11-05T01:56:57.837Z"
+    },
+    {
+      "id": 12,
+      "type": "card_payment",
+      "amount": 45,
+      "description": "Pago con tarjeta para orden R-4B5A0E786F",
+      "denominations": {},
+      "created_at": "2026-11-05T04:10:15.200Z"
+    },
+    {
+      "id": 13,
+      "type": "payment",
+      "amount": 100,
+      "description": "Pago en efectivo recibido para orden 77b40b38-764a-4286-a73d-89a3806f0336",
+      "denominations": {
+        "bill_100": 1
+      },
+      "created_at": "2026-11-05T04:12:49.013Z"
     }
   ],
   "orders": [
@@ -412,6 +492,941 @@
       "paymentMethod": "cash",
       "createdAt": "2026-06-15T06:20:55.904Z",
       "paymentId": "cash-payment-1781504492321"
+    },
+    {
+      "id": "87b90617-8694-4e1e-95c9-07c57f90d331",
+      "folio": "R635512",
+      "operationId": "625c9f18-fc38-416a-a249-e1e35e7b0c7f",
+      "deviceId": "0e3323cc-1254-4485-97e6-54755dbadb5b",
+      "customerName": "1234567",
+      "items": [
+        {
+          "id": "1",
+          "productId": "americano",
+          "productName": "Americano",
+          "product": {
+            "id": "americano",
+            "name": "Americano",
+            "description": "Espresso doble alargado con agua caliente.",
+            "price": 45,
+            "category": "coffee",
+            "icon": "americano",
+            "customizable": true,
+            "image": "/americano.webp",
+            "recipe": {
+              "coffee_beans": 18
+            }
+          },
+          "quantity": 1,
+          "unitPrice": 45,
+          "subtotal": 45,
+          "totalPrice": 45,
+          "customization": {
+            "size": "regular",
+            "milk": "none",
+            "sweetness": "none",
+            "temp": "hot",
+            "extraShot": false
+          },
+          "selectedCustomVariants": {},
+          "modifiers": []
+        }
+      ],
+      "subtotal": 45,
+      "discount": 0,
+      "tax": 0,
+      "total": 45,
+      "status": "COMPLETED",
+      "paymentStatus": "APPROVED",
+      "paymentMethod": "card",
+      "createdAt": "2026-08-30T07:23:55.512Z",
+      "updatedAt": "2026-08-30T07:50:37.716Z",
+      "paymentId": "sim-87b90617-8694-4e1e-95c9-07c57f90d331",
+      "inventoryAppliedAt": "2026-08-30T07:23:57.555Z"
+    },
+    {
+      "id": "e2bcc984-5bc3-4647-bad7-12b93483ddf3",
+      "folio": "R650839",
+      "operationId": "3d5c7837-4bbd-44c1-83f8-6563101de781",
+      "deviceId": "0e3323cc-1254-4485-97e6-54755dbadb5b",
+      "customerName": "m",
+      "items": [
+        {
+          "id": "1",
+          "productId": "croissant-mantequilla",
+          "productName": "Croissant de mantequilla",
+          "product": {
+            "id": "croissant-mantequilla",
+            "name": "Croissant de mantequilla",
+            "description": "Hojaldre laminado, crujiente y ligero.",
+            "price": 45,
+            "category": "bakery",
+            "icon": "croissant",
+            "customizable": false,
+            "image": "/pan-chocolate.jpg",
+            "recipe": {
+              "croissant_finished": 1
+            }
+          },
+          "quantity": 1,
+          "unitPrice": 45,
+          "subtotal": 45,
+          "totalPrice": 45,
+          "customization": {
+            "size": "regular",
+            "milk": "none",
+            "sweetness": "none",
+            "temp": "hot",
+            "extraShot": false
+          },
+          "selectedCustomVariants": {},
+          "modifiers": []
+        }
+      ],
+      "subtotal": 45,
+      "discount": 0,
+      "tax": 0,
+      "total": 45,
+      "status": "COMPLETED",
+      "paymentStatus": "APPROVED",
+      "paymentMethod": "cash",
+      "createdAt": "2026-08-30T07:24:10.839Z",
+      "updatedAt": "2026-11-05T01:57:22.133Z",
+      "paymentId": "cash-e2bcc984-5bc3-4647-bad7-12b93483ddf3",
+      "inventoryAppliedAt": "2026-11-05T01:56:51.270Z"
+    },
+    {
+      "id": "29da6580-2d71-4422-9c7e-bf72dff9dd6f",
+      "folio": "R165310",
+      "operationId": "875ef9cb-9106-4ff9-a6be-f3c45d72b9a4",
+      "deviceId": "f80e8672-f258-4840-a35f-069fe612510f",
+      "customerName": "sd",
+      "items": [
+        {
+          "id": "1",
+          "productId": "americano",
+          "productName": "Americano",
+          "product": {
+            "id": "americano",
+            "name": "Americano",
+            "description": "Espresso doble alargado con agua caliente.",
+            "price": 45,
+            "category": "coffee",
+            "icon": "americano",
+            "customizable": true,
+            "image": "/americano.webp",
+            "recipe": {
+              "coffee_beans": 18
+            }
+          },
+          "quantity": 1,
+          "unitPrice": 57,
+          "subtotal": 57,
+          "totalPrice": 57,
+          "customization": {
+            "size": "grande",
+            "milk": "none",
+            "sweetness": "standard",
+            "temp": "iced",
+            "extraShot": false
+          },
+          "selectedCustomVariants": {},
+          "modifiers": [
+            {
+              "name": "Tamaño grande",
+              "amount": 12
+            }
+          ]
+        }
+      ],
+      "subtotal": 57,
+      "discount": 0,
+      "tax": 0,
+      "total": 57,
+      "status": "COMPLETED",
+      "paymentStatus": "APPROVED",
+      "paymentMethod": "cash",
+      "createdAt": "2026-08-31T05:12:45.310Z",
+      "updatedAt": "2026-11-05T01:57:23.564Z",
+      "paymentId": "cash-29da6580-2d71-4422-9c7e-bf72dff9dd6f",
+      "inventoryAppliedAt": "2026-11-05T01:56:57.837Z"
+    },
+    {
+      "id": "df7aa05d-e27d-4be4-8b77-f705e849dcc9",
+      "folio": "R-DF7AA05DE2",
+      "operationId": "df7aa05d-e27d-4be4-8b77-f705e849dcc9",
+      "deviceId": "5ab30279-a9b3-49e8-8688-6fbd426f5f01",
+      "customerName": "RODRIGO",
+      "items": [
+        {
+          "id": "1",
+          "productId": "americano",
+          "productName": "Americano",
+          "product": {
+            "id": "americano",
+            "name": "Americano",
+            "description": "Espresso doble alargado con agua caliente.",
+            "price": 45,
+            "category": "coffee",
+            "icon": "americano",
+            "customizable": true,
+            "image": "/americano.webp",
+            "recipe": {
+              "coffee_beans": 18
+            }
+          },
+          "quantity": 1,
+          "unitPrice": 57,
+          "subtotal": 57,
+          "totalPrice": 57,
+          "customization": {
+            "size": "grande",
+            "milk": "none",
+            "sweetness": "none",
+            "temp": "hot",
+            "extraShot": false
+          },
+          "selectedCustomVariants": {},
+          "modifiers": [
+            {
+              "name": "Tamaño grande",
+              "amount": 12
+            }
+          ]
+        }
+      ],
+      "subtotal": 57,
+      "discount": 0,
+      "tax": 0,
+      "total": 57,
+      "status": "COMPLETED",
+      "paymentStatus": "APPROVED",
+      "paymentMethod": "card",
+      "createdAt": "2026-11-05T01:38:13.196Z",
+      "updatedAt": "2026-11-05T01:57:23.984Z",
+      "paymentId": "sim-df7aa05d-e27d-4be4-8b77-f705e849dcc9",
+      "inventoryAppliedAt": "2026-11-05T01:38:20.460Z"
+    },
+    {
+      "id": "a4defe3c-c693-45ed-964c-5c9d0c7863cd",
+      "folio": "R-A4DEFE3CC6",
+      "operationId": "a4defe3c-c693-45ed-964c-5c9d0c7863cd",
+      "deviceId": "01ab0c78-8b9a-4752-abd1-2fed20c7f005",
+      "customerName": "RODRIGO",
+      "items": [
+        {
+          "id": "1",
+          "productId": "espresso",
+          "productName": "Espresso",
+          "product": {
+            "id": "espresso",
+            "name": "Espresso",
+            "description": "Extracción doble, intensa y dulce.",
+            "price": 38,
+            "category": "coffee",
+            "icon": "espresso",
+            "customizable": true,
+            "image": "/espresso.webp",
+            "recipe": {
+              "coffee_beans": 18
+            }
+          },
+          "quantity": 2,
+          "unitPrice": 65,
+          "subtotal": 130,
+          "totalPrice": 130,
+          "customization": {
+            "size": "grande",
+            "milk": "none",
+            "sweetness": "standard",
+            "temp": "iced",
+            "extraShot": true
+          },
+          "selectedCustomVariants": {},
+          "modifiers": [
+            {
+              "name": "Tamaño grande",
+              "amount": 12
+            },
+            {
+              "name": "Shot extra",
+              "amount": 15
+            }
+          ]
+        }
+      ],
+      "subtotal": 130,
+      "discount": 130,
+      "discountType": "COURTESY",
+      "discountReason": "RODRIGO",
+      "discountAuthorizedBy": "00000000-0000-4000-8000-000000000001",
+      "tax": 0,
+      "total": 0,
+      "status": "COMPLETED",
+      "paymentStatus": "APPROVED",
+      "paymentMethod": "cash",
+      "createdAt": "2026-11-05T02:00:03.922Z",
+      "updatedAt": "2026-11-05T02:00:44.434Z",
+      "paymentId": "courtesy-a4defe3c-c693-45ed-964c-5c9d0c7863cd",
+      "inventoryAppliedAt": "2026-11-05T02:00:03.926Z"
+    },
+    {
+      "id": "4b5a0e78-6fa0-4039-b8da-f423ded232a3",
+      "folio": "R-4B5A0E786F",
+      "operationId": "4b5a0e78-6fa0-4039-b8da-f423ded232a3",
+      "deviceId": "349a0806-5430-4cab-8437-9d2d7d84a77d",
+      "customerName": "RODRIGO",
+      "items": [
+        {
+          "id": "1",
+          "productId": "americano",
+          "productName": "Americano",
+          "product": {
+            "id": "americano",
+            "name": "Americano",
+            "description": "Espresso doble alargado con agua caliente.",
+            "price": 45,
+            "category": "coffee",
+            "icon": "americano",
+            "customizable": true,
+            "image": "/americano.webp",
+            "recipe": {
+              "coffee_beans": 18
+            }
+          },
+          "quantity": 1,
+          "unitPrice": 45,
+          "subtotal": 45,
+          "totalPrice": 45,
+          "customization": {
+            "size": "regular",
+            "milk": "none",
+            "sweetness": "none",
+            "temp": "hot",
+            "extraShot": false
+          },
+          "selectedCustomVariants": {},
+          "modifiers": []
+        }
+      ],
+      "subtotal": 45,
+      "discount": 0,
+      "tax": 0,
+      "total": 45,
+      "status": "COMPLETED",
+      "paymentStatus": "APPROVED",
+      "paymentMethod": "card",
+      "createdAt": "2026-11-05T04:10:13.722Z",
+      "updatedAt": "2026-11-05T04:13:10.116Z",
+      "paymentId": "sim-4b5a0e78-6fa0-4039-b8da-f423ded232a3",
+      "inventoryAppliedAt": "2026-11-05T04:10:15.200Z"
+    },
+    {
+      "id": "77b40b38-764a-4286-a73d-89a3806f0336",
+      "folio": "R-77B40B3876",
+      "operationId": "77b40b38-764a-4286-a73d-89a3806f0336",
+      "deviceId": "349a0806-5430-4cab-8437-9d2d7d84a77d",
+      "customerName": "RRRRRRR",
+      "items": [
+        {
+          "id": "1",
+          "productId": "croissant-mantequilla",
+          "productName": "Croissant de mantequilla",
+          "product": {
+            "id": "croissant-mantequilla",
+            "name": "Croissant de mantequilla",
+            "description": "Hojaldre laminado, crujiente y ligero.",
+            "price": 45,
+            "category": "bakery",
+            "icon": "croissant",
+            "customizable": false,
+            "image": "/pan-chocolate.jpg",
+            "recipe": {
+              "croissant_finished": 1
+            }
+          },
+          "quantity": 1,
+          "unitPrice": 45,
+          "subtotal": 45,
+          "totalPrice": 45,
+          "customization": {
+            "size": "regular",
+            "milk": "none",
+            "sweetness": "none",
+            "temp": "hot",
+            "extraShot": false
+          },
+          "selectedCustomVariants": {},
+          "modifiers": []
+        },
+        {
+          "id": "2",
+          "productId": "latte",
+          "productName": "Latte",
+          "product": {
+            "id": "latte",
+            "name": "Latte",
+            "description": "Espresso con leche texturizada y espuma fina.",
+            "price": 55,
+            "category": "coffee",
+            "icon": "latte",
+            "customizable": true,
+            "image": "/iced-latte.webp",
+            "recipe": {
+              "coffee_beans": 18,
+              "milk_whole": 250
+            }
+          },
+          "quantity": 1,
+          "unitPrice": 55,
+          "subtotal": 55,
+          "totalPrice": 55,
+          "customization": {
+            "size": "regular",
+            "milk": "whole",
+            "sweetness": "none",
+            "temp": "hot",
+            "extraShot": false
+          },
+          "selectedCustomVariants": {},
+          "modifiers": []
+        }
+      ],
+      "subtotal": 100,
+      "discount": 0,
+      "tax": 0,
+      "total": 100,
+      "status": "COMPLETED",
+      "paymentStatus": "APPROVED",
+      "paymentMethod": "cash",
+      "createdAt": "2026-11-05T04:11:30.167Z",
+      "updatedAt": "2026-11-05T04:13:11.408Z",
+      "paymentId": "cash-77b40b38-764a-4286-a73d-89a3806f0336",
+      "inventoryAppliedAt": "2026-11-05T04:12:49.013Z"
+    },
+    {
+      "id": "772a900e-4c25-4070-91e4-5e52a8c10a32",
+      "folio": "R-772A900E4C",
+      "operationId": "772a900e-4c25-4070-91e4-5e52a8c10a32",
+      "deviceId": "349a0806-5430-4cab-8437-9d2d7d84a77d",
+      "customerName": "M",
+      "items": [
+        {
+          "id": "1",
+          "productId": "croissant-mantequilla",
+          "productName": "Croissant de mantequilla",
+          "product": {
+            "id": "croissant-mantequilla",
+            "name": "Croissant de mantequilla",
+            "description": "Hojaldre laminado, crujiente y ligero.",
+            "price": 45,
+            "category": "bakery",
+            "icon": "croissant",
+            "customizable": false,
+            "image": "/pan-chocolate.jpg",
+            "recipe": {
+              "croissant_finished": 1
+            }
+          },
+          "quantity": 1,
+          "unitPrice": 45,
+          "subtotal": 45,
+          "totalPrice": 45,
+          "customization": {
+            "size": "regular",
+            "milk": "none",
+            "sweetness": "none",
+            "temp": "hot",
+            "extraShot": false
+          },
+          "selectedCustomVariants": {},
+          "modifiers": []
+        }
+      ],
+      "subtotal": 45,
+      "discount": 0,
+      "tax": 0,
+      "total": 45,
+      "status": "PENDING_PAYMENT",
+      "paymentStatus": "NOT_REQUIRED",
+      "paymentMethod": "cash",
+      "createdAt": "2026-11-05T04:11:44.101Z",
+      "updatedAt": "2026-11-05T04:11:44.101Z"
+    },
+    {
+      "id": "549ec050-ec97-4fe8-b3e6-aa7ee9f62e70",
+      "folio": "R-549EC050EC",
+      "operationId": "549ec050-ec97-4fe8-b3e6-aa7ee9f62e70",
+      "deviceId": "e5e53387-a554-4144-b0e1-85b79c22c575",
+      "customerName": "Rodrigo",
+      "items": [
+        {
+          "id": "1",
+          "productId": "americano",
+          "productName": "Americano",
+          "product": {
+            "id": "americano",
+            "name": "Americano",
+            "description": "Espresso doble alargado con agua caliente.",
+            "price": 45,
+            "category": "coffee",
+            "icon": "americano",
+            "customizable": true,
+            "image": "/americano.webp",
+            "recipe": {
+              "coffee_beans": 18
+            }
+          },
+          "quantity": 1,
+          "unitPrice": 60,
+          "subtotal": 60,
+          "totalPrice": 60,
+          "customization": {
+            "size": "regular",
+            "milk": "none",
+            "sweetness": "none",
+            "temp": "hot",
+            "extraShot": true
+          },
+          "selectedCustomVariants": {},
+          "modifiers": [
+            {
+              "name": "Shot extra",
+              "amount": 15
+            }
+          ]
+        },
+        {
+          "id": "2",
+          "productId": "galleta-chocolate",
+          "productName": "Galleta de chocolate",
+          "product": {
+            "id": "galleta-chocolate",
+            "name": "Galleta de chocolate",
+            "description": "Galleta suave con chispas de chocolate.",
+            "price": 35,
+            "category": "bakery",
+            "icon": "pain_choc",
+            "customizable": false,
+            "image": "/galleta-chispas.jpeg",
+            "recipe": {
+              "cookie_finished": 1
+            }
+          },
+          "quantity": 1,
+          "unitPrice": 35,
+          "subtotal": 35,
+          "totalPrice": 35,
+          "customization": {
+            "size": "regular",
+            "milk": "none",
+            "sweetness": "none",
+            "temp": "hot",
+            "extraShot": false
+          },
+          "selectedCustomVariants": {},
+          "modifiers": []
+        }
+      ],
+      "subtotal": 95,
+      "discount": 0,
+      "tax": 0,
+      "total": 95,
+      "status": "PENDING_PAYMENT",
+      "paymentStatus": "NOT_REQUIRED",
+      "paymentMethod": "cash",
+      "createdAt": "2026-11-05T04:14:03.245Z",
+      "updatedAt": "2026-11-05T04:14:03.245Z"
+    },
+    {
+      "id": "ddac3564-72a0-45ac-be57-15c9951adad1",
+      "folio": "R-DDAC356472",
+      "operationId": "ddac3564-72a0-45ac-be57-15c9951adad1",
+      "deviceId": "e5e53387-a554-4144-b0e1-85b79c22c575",
+      "customerName": "Er",
+      "items": [
+        {
+          "id": "1",
+          "productId": "cold-brew",
+          "productName": "Cold brew",
+          "product": {
+            "id": "cold-brew",
+            "name": "Cold brew",
+            "description": "Café extraído en frío, limpio y refrescante.",
+            "price": 58,
+            "category": "cold",
+            "icon": "cold_brew",
+            "customizable": true,
+            "image": "/cold-brew.webp",
+            "recipe": {
+              "cold_brew_concentrate": 180
+            }
+          },
+          "quantity": 1,
+          "unitPrice": 58,
+          "subtotal": 58,
+          "totalPrice": 58,
+          "customization": {
+            "size": "regular",
+            "milk": "none",
+            "sweetness": "none",
+            "temp": "iced",
+            "extraShot": false
+          },
+          "selectedCustomVariants": {},
+          "modifiers": []
+        }
+      ],
+      "subtotal": 58,
+      "discount": 0,
+      "tax": 0,
+      "total": 58,
+      "status": "PENDING_PAYMENT",
+      "paymentStatus": "NOT_REQUIRED",
+      "paymentMethod": "cash",
+      "createdAt": "2026-11-05T04:19:54.883Z",
+      "updatedAt": "2026-11-05T04:19:54.883Z"
+    },
+    {
+      "id": "d000278d-9a93-4163-942d-766cf7b913a8",
+      "folio": "R-D000278D9A",
+      "operationId": "d000278d-9a93-4163-942d-766cf7b913a8",
+      "deviceId": "8b6e1a7a-2055-422b-bc50-3600fdd478b4",
+      "customerName": "rodrigo",
+      "items": [
+        {
+          "id": "1",
+          "productId": "cold-brew",
+          "productName": "Cold brew",
+          "product": {
+            "id": "cold-brew",
+            "name": "Cold brew",
+            "description": "Café extraído en frío, limpio y refrescante.",
+            "price": 58,
+            "category": "cold",
+            "icon": "cold_brew",
+            "customizable": true,
+            "image": "/cold-brew.webp",
+            "recipe": {
+              "cold_brew_concentrate": 180
+            }
+          },
+          "quantity": 1,
+          "unitPrice": 58,
+          "subtotal": 58,
+          "totalPrice": 58,
+          "customization": {
+            "size": "regular",
+            "milk": "none",
+            "sweetness": "none",
+            "temp": "iced",
+            "extraShot": false
+          },
+          "selectedCustomVariants": {},
+          "modifiers": []
+        }
+      ],
+      "subtotal": 58,
+      "discount": 0,
+      "tax": 0,
+      "total": 58,
+      "status": "PENDING_PAYMENT",
+      "paymentStatus": "NOT_REQUIRED",
+      "paymentMethod": "cash",
+      "createdAt": "2026-11-05T05:14:53.853Z",
+      "updatedAt": "2026-11-05T05:14:53.853Z"
     }
-  ]
+  ],
+  "bakeryBatches": [],
+  "dailyClosures": [],
+  "products": [
+    {
+      "id": "espresso",
+      "name": "Espresso",
+      "description": "Extracción doble, intensa y dulce.",
+      "price": 38,
+      "category": "coffee",
+      "icon": "espresso",
+      "customizable": true,
+      "image": "/espresso.webp",
+      "recipe": {
+        "coffee_beans": 18
+      }
+    },
+    {
+      "id": "americano",
+      "name": "Americano",
+      "description": "Espresso doble alargado con agua caliente.",
+      "price": 45,
+      "category": "coffee",
+      "icon": "americano",
+      "customizable": true,
+      "image": "/americano.webp",
+      "recipe": {
+        "coffee_beans": 18
+      }
+    },
+    {
+      "id": "latte",
+      "name": "Latte",
+      "description": "Espresso con leche texturizada y espuma fina.",
+      "price": 55,
+      "category": "coffee",
+      "icon": "latte",
+      "customizable": true,
+      "image": "/iced-latte.webp",
+      "recipe": {
+        "coffee_beans": 18,
+        "milk_whole": 250
+      }
+    },
+    {
+      "id": "matcha-latte",
+      "name": "Matcha latte",
+      "description": "Matcha ceremonial con leche texturizada.",
+      "price": 65,
+      "category": "coffee",
+      "icon": "latte",
+      "customizable": true,
+      "image": "/matcha-latte.jpg",
+      "recipe": {
+        "matcha_powder": 4,
+        "milk_whole": 250
+      }
+    },
+    {
+      "id": "cold-brew",
+      "name": "Cold brew",
+      "description": "Café extraído en frío, limpio y refrescante.",
+      "price": 58,
+      "category": "cold",
+      "icon": "cold_brew",
+      "customizable": true,
+      "image": "/cold-brew.webp",
+      "recipe": {
+        "cold_brew_concentrate": 180
+      }
+    },
+    {
+      "id": "iced-latte",
+      "name": "Iced latte",
+      "description": "Espresso, leche y hielo.",
+      "price": 60,
+      "category": "cold",
+      "icon": "latte",
+      "customizable": true,
+      "image": "/iced-latte.webp",
+      "recipe": {
+        "coffee_beans": 18,
+        "milk_whole": 220,
+        "ice": 120
+      }
+    },
+    {
+      "id": "croissant-mantequilla",
+      "name": "Croissant de mantequilla",
+      "description": "Hojaldre laminado, crujiente y ligero.",
+      "price": 45,
+      "category": "bakery",
+      "icon": "croissant",
+      "customizable": false,
+      "image": "/pan-chocolate.jpg",
+      "recipe": {
+        "croissant_finished": 1
+      }
+    },
+    {
+      "id": "galleta-chocolate",
+      "name": "Galleta de chocolate",
+      "description": "Galleta suave con chispas de chocolate.",
+      "price": 35,
+      "category": "bakery",
+      "icon": "pain_choc",
+      "customizable": false,
+      "image": "/galleta-chispas.jpeg",
+      "recipe": {
+        "cookie_finished": 1
+      }
+    }
+  ],
+  "rawInventory": [
+    {
+      "id": "coffee_beans",
+      "name": "Café en grano",
+      "unit": "g",
+      "stock": 4802,
+      "cost": 2401
+    },
+    {
+      "id": "milk_whole",
+      "name": "Leche entera",
+      "unit": "ml",
+      "stock": 11750,
+      "cost": 376
+    },
+    {
+      "id": "milk_light",
+      "name": "Leche deslactosada",
+      "unit": "ml",
+      "stock": 6000,
+      "cost": 216
+    },
+    {
+      "id": "milk_avena",
+      "name": "Leche de avena",
+      "unit": "ml",
+      "stock": 4000,
+      "cost": 320
+    },
+    {
+      "id": "milk_almendra",
+      "name": "Leche de almendra",
+      "unit": "ml",
+      "stock": 4000,
+      "cost": 360
+    },
+    {
+      "id": "matcha_powder",
+      "name": "Matcha",
+      "unit": "g",
+      "stock": 500,
+      "cost": 1200
+    },
+    {
+      "id": "cold_brew_concentrate",
+      "name": "Concentrado cold brew",
+      "unit": "ml",
+      "stock": 5000,
+      "cost": 700
+    },
+    {
+      "id": "ice",
+      "name": "Hielo",
+      "unit": "g",
+      "stock": 20000,
+      "cost": 200
+    },
+    {
+      "id": "croissant_finished",
+      "name": "Croissant terminado",
+      "unit": "piece",
+      "stock": 28,
+      "cost": 504
+    },
+    {
+      "id": "cookie_finished",
+      "name": "Galleta terminada",
+      "unit": "piece",
+      "stock": 40,
+      "cost": 320
+    }
+  ],
+  "inventoryMovements": [
+    {
+      "id": "87b90617-8694-4e1e-95c9-07c57f90d331:coffee_beans",
+      "ingredientId": "coffee_beans",
+      "quantity": -18,
+      "movementType": "SALE",
+      "orderId": "87b90617-8694-4e1e-95c9-07c57f90d331",
+      "unitCostSnapshot": 0.5,
+      "createdAt": "2026-08-30T07:23:57.555Z"
+    },
+    {
+      "id": "df7aa05d-e27d-4be4-8b77-f705e849dcc9:coffee_beans",
+      "ingredientId": "coffee_beans",
+      "quantity": -27,
+      "movementType": "SALE",
+      "orderId": "df7aa05d-e27d-4be4-8b77-f705e849dcc9",
+      "unitCostSnapshot": 0.5,
+      "createdAt": "2026-11-05T01:38:20.460Z"
+    },
+    {
+      "id": "e2bcc984-5bc3-4647-bad7-12b93483ddf3:croissant_finished",
+      "ingredientId": "croissant_finished",
+      "quantity": -1,
+      "movementType": "SALE",
+      "orderId": "e2bcc984-5bc3-4647-bad7-12b93483ddf3",
+      "unitCostSnapshot": 18,
+      "createdAt": "2026-11-05T01:56:51.270Z"
+    },
+    {
+      "id": "29da6580-2d71-4422-9c7e-bf72dff9dd6f:coffee_beans",
+      "ingredientId": "coffee_beans",
+      "quantity": -27,
+      "movementType": "SALE",
+      "orderId": "29da6580-2d71-4422-9c7e-bf72dff9dd6f",
+      "unitCostSnapshot": 0.5,
+      "createdAt": "2026-11-05T01:56:57.837Z"
+    },
+    {
+      "id": "a4defe3c-c693-45ed-964c-5c9d0c7863cd:coffee_beans",
+      "ingredientId": "coffee_beans",
+      "quantity": -90,
+      "movementType": "SALE",
+      "orderId": "a4defe3c-c693-45ed-964c-5c9d0c7863cd",
+      "unitCostSnapshot": 0.5,
+      "createdAt": "2026-11-05T02:00:03.926Z"
+    },
+    {
+      "id": "4b5a0e78-6fa0-4039-b8da-f423ded232a3:coffee_beans",
+      "ingredientId": "coffee_beans",
+      "quantity": -18,
+      "movementType": "SALE",
+      "orderId": "4b5a0e78-6fa0-4039-b8da-f423ded232a3",
+      "unitCostSnapshot": 0.5,
+      "createdAt": "2026-11-05T04:10:15.200Z"
+    },
+    {
+      "id": "77b40b38-764a-4286-a73d-89a3806f0336:croissant_finished",
+      "ingredientId": "croissant_finished",
+      "quantity": -1,
+      "movementType": "SALE",
+      "orderId": "77b40b38-764a-4286-a73d-89a3806f0336",
+      "unitCostSnapshot": 18,
+      "createdAt": "2026-11-05T04:12:49.013Z"
+    },
+    {
+      "id": "77b40b38-764a-4286-a73d-89a3806f0336:coffee_beans",
+      "ingredientId": "coffee_beans",
+      "quantity": -18,
+      "movementType": "SALE",
+      "orderId": "77b40b38-764a-4286-a73d-89a3806f0336",
+      "unitCostSnapshot": 0.5,
+      "createdAt": "2026-11-05T04:12:49.013Z"
+    },
+    {
+      "id": "77b40b38-764a-4286-a73d-89a3806f0336:milk_whole",
+      "ingredientId": "milk_whole",
+      "quantity": -250,
+      "movementType": "SALE",
+      "orderId": "77b40b38-764a-4286-a73d-89a3806f0336",
+      "unitCostSnapshot": 0.032,
+      "createdAt": "2026-11-05T04:12:49.013Z"
+    }
+  ],
+  "suppliers": [],
+  "purchases": [],
+  "wasteRecords": [],
+  "cashSessions": [
+    {
+      "id": "1cabbfbd-44a1-4bef-97dd-70cbdadf7a91",
+      "openingAmount": 4714,
+      "openingDenominations": {
+        "bill_500": 2,
+        "bill_200": 4,
+        "bill_100": 5,
+        "bill_50": 10,
+        "bill_20": 5,
+        "coin_20": 60,
+        "coin_10": 41,
+        "coin_5": 12,
+        "coin_2": 12,
+        "coin_1": 120
+      },
+      "openedBy": "00000000-0000-4000-8000-000000000001",
+      "openedAt": "2026-11-05T01:56:42.135Z"
+    }
+  ],
+  "productionBatches": [],
+  "inventoryReservations": []
 }

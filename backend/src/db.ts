@@ -1,6 +1,9 @@
-import type { Client } from 'pg';
 import * as fs from 'fs/promises';
+import { AsyncLocalStorage } from 'async_hooks';
 import * as path from 'path';
+import { getEnv } from './config/env';
+import { randomUUID } from 'crypto';
+import { applyPurchaseValue, applyWasteValue } from './domain/inventory';
 
 export interface DbRawInventory {
   id: string; // e.g., 'coffee_beans', 'milk_whole'
@@ -8,6 +11,8 @@ export interface DbRawInventory {
   unit: string; // e.g., 'g', 'ml', 'un'
   stock: number;
   cost: number; // cost per unit or total cost. Let's say cost is total cost for current stock to calculate unit cost: cost / stock.
+  minStock?: number;
+  reservedStock?: number;
 }
 
 export interface CustomVariantOption {
@@ -40,6 +45,11 @@ export interface DbInventoryItem {
   cost: number;
 }
 
+export interface DbInventoryConsumption {
+  ingredientId: string;
+  quantity: number;
+}
+
 export interface DbCashRegister {
   denomination: string;
   count: number;
@@ -47,7 +57,7 @@ export interface DbCashRegister {
 
 export interface DbCashTransaction {
   id?: number;
-  type: 'payment' | 'change' | 'manual_income' | 'manual_expense' | 'adjustment' | 'manual_investment' | 'card_payment';
+  type: 'payment' | 'change' | 'manual_income' | 'manual_expense' | 'adjustment' | 'manual_investment' | 'card_payment' | 'refund';
   amount: number;
   description: string;
   denominations: Record<string, number>;
@@ -55,6 +65,9 @@ export interface DbCashTransaction {
   status?: 'active' | 'deleted' | 'modified';
   audit_reason?: string;
   original_amount?: number;
+  operationId?: string;
+  createdBy?: string;
+  cashSessionId?: string;
 }
 
 export interface DbBakeryBatch {
@@ -76,35 +89,192 @@ export interface DbDailyClosure {
   cash_end: number;
   products_sold: Record<string, number>;
   notes?: string;
+  period_start?: string;
+  period_end?: string;
+  cash_sales?: number;
+  card_sales?: number;
+  refunds?: number;
+  discounts?: number;
+  cost_of_goods?: number;
+  expenses?: number;
+  gross_margin?: number;
+  operating_result?: number;
+  expected_cash?: number;
+  counted_cash?: number;
+  difference?: number;
+  tickets?: number;
+  closed_by?: string;
+}
+
+export interface DbSupplier {
+  id: string;
+  name: string;
+  contactName?: string;
+  phone?: string;
+  email?: string;
+  notes?: string;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface DbPurchaseItem {
+  ingredientId: string;
+  quantity: number;
+  unit: string;
+  unitCost: number;
+  subtotal: number;
+}
+
+export interface DbPurchase {
+  cashDenominations?: Record<string, number>;
+  id: string;
+  supplierId?: string;
+  invoiceReference?: string;
+  paymentMethod: string;
+  total: number;
+  notes?: string;
+  purchasedAt: string;
+  createdBy: string;
+  operationId: string;
+  items: DbPurchaseItem[];
+}
+
+export interface DbWasteRecord {
+  id: string;
+  ingredientId: string;
+  quantity: number;
+  costSnapshot: number;
+  reason: string;
+  userId: string;
+  operationId: string;
+  createdAt: string;
+}
+
+export interface DbInventoryMovement {
+  id: string;
+  ingredientId: string;
+  quantity: number;
+  movementType: 'PURCHASE' | 'SALE' | 'WASTE' | 'ADJUSTMENT' | 'PRODUCTION' | 'RETURN' | 'TRANSFER';
+  reason?: string;
+  userId?: string;
+  deviceId?: string;
+  orderId?: string;
+  purchaseId?: string;
+  operationId?: string;
+  unitCostSnapshot: number;
+  createdAt: string;
+}
+
+export interface DbCashSession {
+  id: string;
+  openingAmount: number;
+  openingDenominations: Record<string, number>;
+  openedBy: string;
+  openedAt: string;
+  expectedCash?: number;
+  countedCash?: number;
+  difference?: number;
+  closingDenominations?: Record<string, number>;
+  closedBy?: string;
+  closedAt?: string;
+}
+
+export interface DbProductionBatch {
+  id: string;
+  productId: string;
+  quantityProduced: number;
+  totalCost: number;
+  wasteQuantity: number;
+  expiresAt?: string;
+  responsibleUserId: string;
+  operationId: string;
+  producedAt: string;
+  consumption: DbInventoryConsumption[];
+}
+
+export interface DbOrderItem {
+  id?: string;
+  productId?: string;
+  productName?: string;
+  product?: DbProduct;
+  quantity: number;
+  unitPrice?: number;
+  subtotal?: number;
+  totalPrice?: number;
+  customization?: Record<string, unknown>;
+  selectedCustomVariants?: Record<string, string>;
+  modifiers?: Array<{ name: string; amount: number }>;
+  notes?: string;
 }
 
 import { SupabaseDbAdapter } from './supabaseAdapter';
 
 // Order structures match our existing types
+export interface DbPickupSettings {
+  enabled: boolean;
+  locationName: string;
+  locationAddress: string;
+  instructions: string;
+}
+
 export interface DbOrder {
   id: string;
+  folio?: string;
+  operationId?: string;
+  deviceId?: string;
+  channel?: 'POS' | 'QR_PICKUP';
+  paymentProvider?: 'MERCADO_PAGO' | 'STRIPE';
+  pickup?: {
+    accessTokenHash: string;
+    requestHash: string;
+    standId: string;
+    locationName: string;
+    locationAddress: string;
+    expiresAt: string;
+  };
+  baristaId?: string;
   customerName: string;
-  items: any[];
+  items: DbOrderItem[];
+  subtotal?: number;
+  discount?: number;
+  discountType?: string;
+  discountReason?: string;
+  discountAuthorizedBy?: string;
+  tax?: number;
   total: number;
   status: string;
+  paymentStatus?: string;
   paymentMethod: 'card' | 'cash';
   paymentId?: string;
   paymentIntentId?: string;
+  notes?: string;
+  cancellationReason?: string;
+  inventoryAppliedAt?: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 // Adaptor interface
 export interface DbAdapter {
   initialize(): Promise<void>;
   getOrders(): Promise<DbOrder[]>;
-  createOrder(order: DbOrder): Promise<void>;
-  updateOrderStatus(orderId: string, status: string, paymentId?: string): Promise<void>;
-  clearOrders(): Promise<void>;
+  getOrderById(id: string): Promise<DbOrder | undefined>;
+  getOrderByOperationId(operationId: string): Promise<DbOrder | undefined>;
+  getPendingPickupOrders(): Promise<DbOrder[]>;
+  getPickupSettings(): Promise<DbPickupSettings | undefined>;
+  savePickupSettings(settings: DbPickupSettings): Promise<void>;
+  createOrder(order: DbOrder): Promise<boolean>;
+  attachPaymentIntent(orderId: string, paymentIntentId: string): Promise<void>;
+  reserveOrderInventory(orderId: string, consumption: DbInventoryConsumption[]): Promise<void>;
+  updateOrderStatus(orderId: string, status: string, paymentId?: string, paymentStatus?: string, cancellationReason?: string): Promise<void>;
+  confirmOrderPayment(orderId: string, paymentId: string, consumption: DbInventoryConsumption[]): Promise<boolean>;
+  confirmCashOrderPayment(input: { orderId: string; paymentId: string; consumption: DbInventoryConsumption[]; receivedAmount: number; changeAmount: number; receivedDenominations: Record<string, number>; changeDenominations: Record<string, number> }): Promise<boolean>;
+  applyOrderRefund(input: { orderId: string; operationId: string; reason: string; userId: string; cashDenominations?: Record<string, number> }): Promise<boolean>;
   getInventory(): Promise<DbInventoryItem[]>;
   updateInventory(productId: string, stock: number, cost: number): Promise<void>;
   
   getRawInventory(): Promise<DbRawInventory[]>;
-  updateRawInventory(id: string, stock: number, cost: number): Promise<void>;
+  adjustRawInventory(input: { id: string; stock: number; cost: number; reason: string; userId: string; operationId: string }): Promise<boolean>;
   createRawInventoryItem(item: DbRawInventory): Promise<void>;
   getProducts(): Promise<DbProduct[]>;
   createProduct(product: DbProduct): Promise<void>;
@@ -115,46 +285,108 @@ export interface DbAdapter {
   updateProductRecipe(productId: string, recipe: Record<string, number>): Promise<void>;
   getCashRegister(): Promise<Record<string, number>>;
   adjustCashRegister(denominations: Record<string, number>): Promise<void>;
-  addCashTransaction(transaction: DbCashTransaction): Promise<void>;
+  addCashTransaction(transaction: DbCashTransaction): Promise<boolean>;
   getTransactionLedger(): Promise<DbCashTransaction[]>;
   updateCashTransaction(id: number, status: 'deleted' | 'modified', auditReason: string, newAmount?: number): Promise<void>;
   getBakeryBatches(): Promise<DbBakeryBatch[]>;
   addBakeryBatch(batch: DbBakeryBatch): Promise<void>;
   getDailyClosures(): Promise<DbDailyClosure[]>;
   createDailyClosure(closure: DbDailyClosure): Promise<void>;
+  getSuppliers(): Promise<DbSupplier[]>;
+  createSupplier(supplier: DbSupplier): Promise<void>;
+  getPurchases(): Promise<DbPurchase[]>;
+  recordPurchase(purchase: DbPurchase): Promise<boolean>;
+  getWasteRecords(): Promise<DbWasteRecord[]>;
+  recordWaste(record: DbWasteRecord): Promise<boolean>;
+  getInventoryMovements(): Promise<DbInventoryMovement[]>;
+  getCashSessions(): Promise<DbCashSession[]>;
+  getOpenCashSession(): Promise<DbCashSession | undefined>;
+  openCashSession(session: DbCashSession): Promise<boolean>;
+  closeCashSession(sessionId: string, close: Pick<DbCashSession, 'expectedCash' | 'countedCash' | 'difference' | 'closingDenominations' | 'closedBy' | 'closedAt'>): Promise<boolean>;
+  closeCashSessionWithClosing(sessionId: string, close: Pick<DbCashSession, 'expectedCash' | 'countedCash' | 'difference' | 'closingDenominations' | 'closedBy' | 'closedAt'>, closure: DbDailyClosure): Promise<boolean>;
+  getProductionBatches(): Promise<DbProductionBatch[]>;
+  recordProductionBatch(batch: DbProductionBatch): Promise<boolean>;
 }
 
 // 1. JSON Local File Database Adapter (for local development / offline fallback)
-class JsonDbAdapter implements DbAdapter {
-  private filePath = path.join(__dirname, '..', 'db.json');
+export class JsonDbAdapter implements DbAdapter {
+  private filePath = process.env.DB_FILE_PATH ? path.resolve(process.env.DB_FILE_PATH) : path.join(__dirname, '..', 'db.json');
+  private mutationTail: Promise<void> = Promise.resolve();
+  private readonly operationContext = new AsyncLocalStorage<boolean>();
+
+  constructor(filePath?: string) {
+    if (filePath) this.filePath = path.resolve(filePath);
+    // File reads share mutable adapter state with writes. Serialize both so a
+    // concurrent status poll cannot replace an in-progress sale with old data.
+    const internal = new Set(['constructor', 'read', 'save', 'serializeMutation', 'confirmOrderPaymentUnsafe']);
+    for (const name of Object.getOwnPropertyNames(JsonDbAdapter.prototype)) {
+      if (internal.has(name)) continue;
+      const method = Reflect.get(this, name) as (...args: unknown[]) => Promise<unknown>;
+      Object.defineProperty(this, name, { value: (...args: unknown[]) => this.serializeMutation(() => method.apply(this, args)) });
+    }
+  }
   private data: {
+    pickupSettings?: DbPickupSettings;
+    inventoryReservations?: Array<{ orderId: string; consumption: DbInventoryConsumption[] }>;
     orders: DbOrder[];
     inventory: DbInventoryItem[];
     cashRegister: Record<string, number>;
     transactions: DbCashTransaction[];
     bakeryBatches: DbBakeryBatch[];
     dailyClosures: DbDailyClosure[];
+    products: DbProduct[];
+    rawInventory: DbRawInventory[];
+    inventoryMovements: DbInventoryMovement[];
+    suppliers: DbSupplier[];
+    purchases: DbPurchase[];
+    wasteRecords: DbWasteRecord[];
+    cashSessions: DbCashSession[];
+    productionBatches: DbProductionBatch[];
   } = {
     orders: [],
     inventory: [],
     cashRegister: {},
     transactions: [],
     bakeryBatches: [],
-    dailyClosures: []
+    dailyClosures: [],
+    products: [],
+    rawInventory: [],
+    inventoryMovements: [],
+    suppliers: [],
+    purchases: [],
+    wasteRecords: [],
+    cashSessions: [],
+    productionBatches: [],
   };
 
   private async read() {
     try {
       const content = await fs.readFile(this.filePath, 'utf8');
       this.data = JSON.parse(content);
-    } catch (e) {
-      // If file doesn't exist, keep default and save it
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       await this.save();
     }
   }
 
   private async save() {
-    await fs.writeFile(this.filePath, JSON.stringify(this.data, null, 2), 'utf8');
+    for (const ingredient of this.data.rawInventory ?? []) {
+      const reserved = (this.data.inventoryReservations ?? []).flatMap((entry) => entry.consumption).filter((entry) => entry.ingredientId === ingredient.id).reduce((sum, entry) => sum + entry.quantity, 0);
+      if (ingredient.stock < reserved) throw new Error('El inventario está reservado para un cobro pendiente. Finaliza o cancela ese cobro antes de modificarlo.');
+    }
+    await fs.mkdir(path.dirname(this.filePath), { recursive: true });
+    const temporaryPath = `${this.filePath}.${randomUUID()}.tmp`;
+    await fs.writeFile(temporaryPath, JSON.stringify(this.data, null, 2), 'utf8');
+    await fs.rename(temporaryPath, this.filePath);
+  }
+
+  private async serializeMutation<T>(mutation: () => Promise<T>): Promise<T> {
+    if (this.operationContext.getStore()) return mutation();
+    const previous = this.mutationTail;
+    let release!: () => void;
+    this.mutationTail = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try { return await this.operationContext.run(true, mutation); } finally { release(); }
   }
 
   async initialize() {
@@ -204,6 +436,21 @@ class JsonDbAdapter implements DbAdapter {
       this.data.dailyClosures = [];
     }
 
+    if (!this.data.products || this.data.products.length === 0) {
+      const { DEFAULT_PRODUCTS } = await import('./domain/catalog');
+      this.data.products = DEFAULT_PRODUCTS;
+    }
+    if (!this.data.rawInventory || this.data.rawInventory.length === 0) {
+      const { DEFAULT_RAW_INVENTORY } = await import('./domain/catalog');
+      this.data.rawInventory = DEFAULT_RAW_INVENTORY;
+    }
+    if (!this.data.inventoryMovements) this.data.inventoryMovements = [];
+    if (!this.data.suppliers) this.data.suppliers = [];
+    if (!this.data.purchases) this.data.purchases = [];
+    if (!this.data.wasteRecords) this.data.wasteRecords = [];
+    if (!this.data.cashSessions) this.data.cashSessions = [];
+    if (!this.data.productionBatches) this.data.productionBatches = [];
+
     await this.save();
   }
 
@@ -212,40 +459,178 @@ class JsonDbAdapter implements DbAdapter {
     return this.data.orders || [];
   }
 
-  async createOrder(order: DbOrder): Promise<void> {
+  async getOrderById(id: string): Promise<DbOrder | undefined> {
+    return (await this.getOrders()).find((order) => order.id === id);
+  }
+  async getPendingPickupOrders(): Promise<DbOrder[]> {
     await this.read();
-    if (!this.data.orders) this.data.orders = [];
-    this.data.orders.push(order);
-
-    // Decrement stock in inventory
-    if (this.data.inventory) {
-      order.items.forEach((item: any) => {
-        const invItem = this.data.inventory.find(i => i.product_id === item.product.id);
-        if (invItem) {
-          invItem.stock = Math.max(0, invItem.stock - item.quantity);
-        }
-      });
-    }
-
-    await this.save();
+    return this.data.orders.filter((order) => order.channel === 'QR_PICKUP' && order.status === 'PENDING_PAYMENT' && order.paymentStatus === 'PENDING').slice(0, 100);
   }
 
-  async updateOrderStatus(orderId: string, status: string, paymentId?: string): Promise<void> {
+  async getPickupSettings(): Promise<DbPickupSettings | undefined> { await this.read(); return this.data.pickupSettings; }
+  async savePickupSettings(settings: DbPickupSettings): Promise<void> { await this.read(); this.data.pickupSettings = settings; await this.save(); }
+
+  async getOrderByOperationId(operationId: string): Promise<DbOrder | undefined> {
+    return (await this.getOrders()).find((order) => order.operationId === operationId);
+  }
+
+  async createOrder(order: DbOrder): Promise<boolean> {
+    return this.serializeMutation(async () => {
+      await this.read();
+      if (!this.data.orders) this.data.orders = [];
+      if (this.data.orders.some((existing) => existing.id === order.id || (order.operationId && existing.operationId === order.operationId))) return false;
+      this.data.orders.push(order);
+      await this.save();
+      return true;
+    });
+  }
+
+  async updateOrderStatus(orderId: string, status: string, paymentId?: string, paymentStatus?: string, cancellationReason?: string): Promise<void> {
+    return this.serializeMutation(async () => {
     await this.read();
     const order = this.data.orders.find(o => o.id === orderId);
     if (order) {
+      if (paymentStatus === 'REJECTED' && (order.status !== 'PENDING_PAYMENT' || order.paymentStatus !== 'PENDING')) return;
       order.status = status;
       if (paymentId) {
         order.paymentId = paymentId;
       }
+      if (paymentStatus) order.paymentStatus = paymentStatus;
+      if (cancellationReason) order.cancellationReason = cancellationReason;
+      order.updatedAt = new Date().toISOString();
+      if (status === 'CANCELLED' || paymentStatus === 'REJECTED') this.data.inventoryReservations = (this.data.inventoryReservations ?? []).filter((entry) => entry.orderId !== orderId);
       await this.save();
     }
+    });
   }
 
-  async clearOrders(): Promise<void> {
+  async reserveOrderInventory(orderId: string, consumption: DbInventoryConsumption[]): Promise<void> {
     await this.read();
-    this.data.orders = [];
+    if ((this.data.inventoryReservations ?? []).some((entry) => entry.orderId === orderId)) return;
+    for (const item of consumption) {
+      const ingredient = this.data.rawInventory.find((entry) => entry.id === item.ingredientId);
+      const reserved = (this.data.inventoryReservations ?? []).flatMap((entry) => entry.consumption).filter((entry) => entry.ingredientId === item.ingredientId).reduce((sum, entry) => sum + entry.quantity, 0);
+      if (!ingredient || ingredient.stock - reserved < item.quantity) throw new Error('No hay inventario disponible para enviar este pedido a la terminal.');
+    }
+    this.data.inventoryReservations = [...(this.data.inventoryReservations ?? []), { orderId, consumption }];
     await this.save();
+  }
+
+  async attachPaymentIntent(orderId: string, paymentIntentId: string): Promise<void> {
+    return this.serializeMutation(async () => {
+      await this.read();
+      const order = this.data.orders.find((entry) => entry.id === orderId);
+      if (!order) throw new Error('Order not found');
+      if (order.paymentIntentId && order.paymentIntentId !== paymentIntentId) throw new Error('Payment intent conflict');
+      order.paymentIntentId = paymentIntentId;
+      order.updatedAt = new Date().toISOString();
+      await this.save();
+    });
+  }
+
+  async confirmOrderPayment(orderId: string, paymentId: string, consumption: DbInventoryConsumption[]): Promise<boolean> {
+    return this.serializeMutation(() => this.confirmOrderPaymentUnsafe(orderId, paymentId, consumption));
+  }
+
+  private async confirmOrderPaymentUnsafe(orderId: string, paymentId: string, consumption: DbInventoryConsumption[]): Promise<boolean> {
+    await this.read();
+    const order = this.data.orders.find((entry) => entry.id === orderId);
+    if (!order) throw new Error('Order not found');
+    if (order.paymentStatus === 'APPROVED' || order.paymentStatus === 'REFUNDED' || order.status === 'CANCELLED') return false;
+    this.data.inventoryReservations = (this.data.inventoryReservations ?? []).filter((entry) => entry.orderId !== orderId);
+    for (const item of consumption) {
+      const inventory = this.data.rawInventory.find((entry) => entry.id === item.ingredientId);
+      if (!inventory) throw new Error(`Inventory item not found: ${item.ingredientId}`);
+      if (inventory.stock < item.quantity) throw new Error(`Insufficient inventory: ${item.ingredientId}`);
+    }
+    const now = new Date().toISOString();
+    for (const item of consumption) {
+      const inventory = this.data.rawInventory.find((entry) => entry.id === item.ingredientId);
+      const valuation = applyWasteValue({ stock: inventory!.stock, totalCost: inventory!.cost, quantity: item.quantity });
+      inventory!.stock = valuation.stock;
+      inventory!.cost = valuation.totalCost;
+      this.data.inventoryMovements.push({
+        id: `${orderId}:${item.ingredientId}`,
+        ingredientId: item.ingredientId,
+        quantity: -item.quantity,
+        movementType: 'SALE',
+        orderId,
+        unitCostSnapshot: valuation.unitCost,
+        createdAt: now,
+      });
+    }
+    Object.assign(order, { status: 'PAID', paymentStatus: 'APPROVED', paymentId, inventoryAppliedAt: now, updatedAt: now });
+    if (order.paymentMethod === 'card') {
+      this.data.transactions.push({ id: this.data.transactions.length + 1, type: 'card_payment', amount: order.total, description: `Pago con tarjeta para orden ${order.folio || order.id}`, denominations: {}, created_at: now });
+    }
+    await this.save();
+    return true;
+  }
+
+  async confirmCashOrderPayment(input: { orderId: string; paymentId: string; consumption: DbInventoryConsumption[]; receivedAmount: number; changeAmount: number; receivedDenominations: Record<string, number>; changeDenominations: Record<string, number> }): Promise<boolean> {
+    return this.serializeMutation(() => this.confirmCashOrderPaymentUnsafe(input));
+  }
+
+  private async confirmCashOrderPaymentUnsafe(input: { orderId: string; paymentId: string; consumption: DbInventoryConsumption[]; receivedAmount: number; changeAmount: number; receivedDenominations: Record<string, number>; changeDenominations: Record<string, number> }): Promise<boolean> {
+    await this.read();
+    if (!this.data.cashSessions.some((session) => !session.closedAt)) throw new Error('Cash session required');
+    const order = this.data.orders.find((entry) => entry.id === input.orderId);
+    if (!order) throw new Error('Order not found');
+    if (order.paymentStatus === 'APPROVED') return false;
+    for (const item of input.consumption) {
+      const inventory = this.data.rawInventory.find((entry) => entry.id === item.ingredientId);
+      if (!inventory) throw new Error(`Inventory item not found: ${item.ingredientId}`);
+      if (inventory.stock < item.quantity) throw new Error(`Insufficient inventory: ${item.ingredientId}`);
+    }
+    const now = new Date().toISOString();
+    for (const item of input.consumption) {
+      const inventory = this.data.rawInventory.find((entry) => entry.id === item.ingredientId)!;
+      const valuation = applyWasteValue({ stock: inventory.stock, totalCost: inventory.cost, quantity: item.quantity });
+      inventory.stock = valuation.stock;
+      inventory.cost = valuation.totalCost;
+      this.data.inventoryMovements.push({ id: `${input.orderId}:${item.ingredientId}`, ingredientId: item.ingredientId, quantity: -item.quantity, movementType: 'SALE', orderId: input.orderId, unitCostSnapshot: valuation.unitCost, createdAt: now });
+    }
+    Object.assign(order, { status: 'PAID', paymentStatus: 'APPROVED', paymentId: input.paymentId, inventoryAppliedAt: now, updatedAt: now });
+    const nextId = this.data.transactions.length + 1;
+    this.data.transactions.push({ id: nextId, type: 'payment', amount: input.receivedAmount, description: `Pago en efectivo recibido para orden ${input.orderId}`, denominations: input.receivedDenominations, created_at: now });
+    if (input.changeAmount > 0) this.data.transactions.push({ id: nextId + 1, type: 'change', amount: input.changeAmount, description: `Cambio devuelto para orden ${input.orderId}`, denominations: input.changeDenominations, created_at: now });
+    for (const [denomination, count] of Object.entries(input.receivedDenominations)) this.data.cashRegister[denomination] = (this.data.cashRegister[denomination] || 0) + count;
+    for (const [denomination, count] of Object.entries(input.changeDenominations)) {
+      if ((this.data.cashRegister[denomination] || 0) < count) throw new Error(`Insufficient cash denomination: ${denomination}`);
+      this.data.cashRegister[denomination] -= count;
+    }
+    await this.save();
+    return true;
+  }
+
+  async applyOrderRefund(input: { orderId: string; operationId: string; reason: string; userId: string; cashDenominations?: Record<string, number> }): Promise<boolean> {
+    return this.serializeMutation(async () => {
+      await this.read();
+      const order = this.data.orders.find((entry) => entry.id === input.orderId);
+      if (!order) throw new Error('Order not found');
+      if (order.status === 'REFUNDED' || order.paymentStatus === 'REFUNDED') return false;
+      const saleMovements = this.data.inventoryMovements.filter((entry) => entry.orderId === order.id && entry.movementType === 'SALE');
+      const now = new Date().toISOString();
+      for (const movement of saleMovements) {
+        const inventory = this.data.rawInventory.find((entry) => entry.id === movement.ingredientId);
+        if (!inventory) throw new Error(`Inventory item not found: ${movement.ingredientId}`);
+        const quantity = Math.abs(movement.quantity);
+        inventory.stock += quantity;
+        inventory.cost = Math.round((inventory.cost + quantity * movement.unitCostSnapshot) * 100) / 100;
+        this.data.inventoryMovements.push({ id: `${input.operationId}:${movement.ingredientId}`, ingredientId: movement.ingredientId, quantity, movementType: 'RETURN', reason: input.reason, userId: input.userId, orderId: order.id, operationId: input.operationId, unitCostSnapshot: movement.unitCostSnapshot, createdAt: now });
+      }
+      if (order.paymentMethod === 'cash') {
+        if (!input.cashDenominations) throw new Error('Cash denominations required');
+        for (const [denomination, count] of Object.entries(input.cashDenominations)) {
+          if ((this.data.cashRegister[denomination] || 0) < count) throw new Error(`Insufficient cash denomination: ${denomination}`);
+          this.data.cashRegister[denomination] -= count;
+        }
+      }
+      this.data.transactions.push({ id: this.data.transactions.length + 1, type: 'refund', amount: order.total, description: `Devolución de orden ${order.folio || order.id}: ${input.reason}`, denominations: input.cashDenominations || {}, created_at: now });
+      Object.assign(order, { status: 'REFUNDED', paymentStatus: 'REFUNDED', updatedAt: now });
+      await this.save();
+      return true;
+    });
   }
 
   async getInventory(): Promise<DbInventoryItem[]> {
@@ -266,16 +651,49 @@ class JsonDbAdapter implements DbAdapter {
     await this.save();
   }
 
-  async getRawInventory(): Promise<import('./db').DbRawInventory[]> { return []; }
-  async updateRawInventory(id: string, stock: number, cost: number): Promise<void> {}
-  async createRawInventoryItem(item: import('./db').DbRawInventory): Promise<void> {}
-  async getProducts(): Promise<DbProduct[]> { return []; }
-  async createProduct(product: DbProduct): Promise<void> {}
-  async updateProduct(id: string, product: Partial<DbProduct>): Promise<void> {}
-  async deleteProduct(id: string): Promise<void> {}
-  async uploadProductImage(f: string, b: Buffer, m: string): Promise<string> { return ''; }
-  async updateProductPrice(id: string, price: number): Promise<void> {}
-  async updateProductRecipe(productId: string, recipe: Record<string, number>): Promise<void> {}
+  async getRawInventory(): Promise<import('./db').DbRawInventory[]> {
+    await this.read();
+    return this.data.rawInventory.map((ingredient) => ({ ...ingredient, reservedStock: (this.data.inventoryReservations ?? []).flatMap((entry) => entry.consumption).filter((entry) => entry.ingredientId === ingredient.id).reduce((sum, entry) => sum + entry.quantity, 0) }));
+  }
+  async adjustRawInventory(input: { id: string; stock: number; cost: number; reason: string; userId: string; operationId: string }): Promise<boolean> {
+    return this.serializeMutation(async () => {
+      await this.read();
+      if (this.data.inventoryMovements.some((movement) => movement.operationId === input.operationId)) return false;
+      const inventory = this.data.rawInventory.find((item) => item.id === input.id);
+      if (!inventory) throw new Error(`Inventory item not found: ${input.id}`);
+      const previousStock = inventory.stock;
+      const previousCost = inventory.cost;
+      inventory.stock = input.stock;
+      inventory.cost = input.cost;
+      this.data.inventoryMovements.push({
+        id: input.operationId,
+        ingredientId: input.id,
+        quantity: input.stock - previousStock,
+        movementType: 'ADJUSTMENT',
+        reason: input.reason,
+        userId: input.userId,
+        operationId: input.operationId,
+        unitCostSnapshot: previousStock > 0 ? previousCost / previousStock : 0,
+        createdAt: new Date().toISOString(),
+      });
+      await this.save();
+      return true;
+    });
+  }
+  async createRawInventoryItem(item: import('./db').DbRawInventory): Promise<void> { await this.read(); if (!this.data.rawInventory.some((entry) => entry.id === item.id)) this.data.rawInventory.push(item); await this.save(); }
+  async getProducts(): Promise<DbProduct[]> { await this.read(); return this.data.products; }
+  async createProduct(product: DbProduct): Promise<void> { await this.read(); this.data.products.push(product); await this.save(); }
+  async updateProduct(id: string, product: Partial<DbProduct>): Promise<void> { await this.read(); const index = this.data.products.findIndex((entry) => entry.id === id); if (index >= 0) this.data.products[index] = { ...this.data.products[index], ...product }; await this.save(); }
+  async deleteProduct(id: string): Promise<void> { await this.read(); this.data.products = this.data.products.filter((entry) => entry.id !== id); await this.save(); }
+  async uploadProductImage(_fileName: string, buffer: Buffer, mimeType: string): Promise<string> {
+    const directory = path.join(path.dirname(this.filePath), 'rofe-product-images');
+    await fs.mkdir(directory, { recursive: true });
+    const fileName = `${randomUUID()}.${mimeType === 'image/jpeg' ? 'jpg' : mimeType.split('/')[1]}`;
+    await fs.writeFile(path.join(directory, fileName), buffer);
+    return `/api/product-images/${fileName}`;
+  }
+  async updateProductPrice(id: string, price: number): Promise<void> { await this.updateProduct(id, { price }); }
+  async updateProductRecipe(productId: string, recipe: Record<string, number>): Promise<void> { await this.updateProduct(productId, { recipe }); }
 
   async getCashRegister(): Promise<Record<string, number>> {
     await this.read();
@@ -307,27 +725,25 @@ class JsonDbAdapter implements DbAdapter {
     await this.save();
   }
 
-  async addCashTransaction(transaction: DbCashTransaction): Promise<void> {
-    await this.read();
-    if (!this.data.transactions) this.data.transactions = [];
-    
-    const newTx = {
-      ...transaction,
-      id: this.data.transactions.length + 1,
-      created_at: new Date().toISOString()
-    };
-    this.data.transactions.push(newTx);
-
-    // Update cash register counts
-    if (this.data.cashRegister) {
-      Object.entries(transaction.denominations).forEach(([denom, count]) => {
-        // If type is change, manual_expense, or manual_investment, we subtract. Otherwise we add
-        const multiplier = (transaction.type === 'change' || transaction.type === 'manual_expense' || transaction.type === 'manual_investment') ? -1 : 1;
-        this.data.cashRegister[denom] = Math.max(0, (this.data.cashRegister[denom] || 0) + (count * multiplier));
-      });
-    }
-
-    await this.save();
+  async addCashTransaction(transaction: DbCashTransaction): Promise<boolean> {
+    return this.serializeMutation(async () => {
+      await this.read();
+      if (!this.data.transactions) this.data.transactions = [];
+      if (transaction.operationId && this.data.transactions.some((entry) => entry.operationId === transaction.operationId)) return false;
+      const subtractsCash = transaction.type === 'change' || transaction.type === 'manual_expense' || transaction.type === 'manual_investment' || transaction.type === 'refund';
+      if (subtractsCash) {
+        for (const [denomination, count] of Object.entries(transaction.denominations)) {
+          if ((this.data.cashRegister[denomination] || 0) < count) throw new Error(`Insufficient cash denomination: ${denomination}`);
+        }
+      }
+      const newTx = { ...transaction, id: this.data.transactions.length + 1, created_at: new Date().toISOString() };
+      this.data.transactions.push(newTx);
+      for (const [denomination, count] of Object.entries(transaction.denominations)) {
+        this.data.cashRegister[denomination] = (this.data.cashRegister[denomination] || 0) + count * (subtractsCash ? -1 : 1);
+      }
+      await this.save();
+      return true;
+    });
   }
 
   async getTransactionLedger(): Promise<DbCashTransaction[]> {
@@ -377,371 +793,164 @@ class JsonDbAdapter implements DbAdapter {
     this.data.dailyClosures.push(closure);
     await this.save();
   }
-}
 
-// 2. PostgreSQL Cloud Database Adapter (for Render production)
-class PostgresDbAdapter implements DbAdapter {
-  private client: Client;
+  async getSuppliers(): Promise<DbSupplier[]> { await this.read(); return this.data.suppliers; }
+  async createSupplier(supplier: DbSupplier): Promise<void> {
+    await this.read();
+    if (this.data.suppliers.some((entry) => entry.id === supplier.id)) return;
+    this.data.suppliers.push(supplier);
+    await this.save();
+  }
+  async getPurchases(): Promise<DbPurchase[]> { await this.read(); return this.data.purchases; }
+  async recordPurchase(purchase: DbPurchase): Promise<boolean> {
+    return this.serializeMutation(() => this.recordPurchaseUnsafe(purchase));
+  }
 
-  constructor(connectionString: string) {
-    const { Client: PgClient } = require('pg');
-    this.client = new PgClient({
-      connectionString,
-      ssl: {
-        rejectUnauthorized: false
+  private async recordPurchaseUnsafe(purchase: DbPurchase): Promise<boolean> {
+    await this.read();
+    if (this.data.purchases.some((entry) => entry.operationId === purchase.operationId)) return false;
+    for (const line of purchase.items) {
+      if (!this.data.rawInventory.some((entry) => entry.id === line.ingredientId)) throw new Error(`Inventory item not found: ${line.ingredientId}`);
+    }
+    for (const line of purchase.items) {
+      const inventory = this.data.rawInventory.find((entry) => entry.id === line.ingredientId)!;
+      const valuation = applyPurchaseValue({ stock: inventory.stock, totalCost: inventory.cost, addedStock: line.quantity, addedCost: line.subtotal });
+      inventory.stock = valuation.stock;
+      inventory.cost = valuation.totalCost;
+      this.data.inventoryMovements.push({
+        id: `${purchase.id}:${line.ingredientId}`,
+        ingredientId: line.ingredientId,
+        quantity: line.quantity,
+        movementType: 'PURCHASE',
+        reason: purchase.invoiceReference || purchase.notes,
+        userId: purchase.createdBy,
+        purchaseId: purchase.id,
+        operationId: purchase.operationId,
+        unitCostSnapshot: line.unitCost,
+        createdAt: purchase.purchasedAt,
+      });
+    }
+    if (purchase.paymentMethod === 'cash') {
+      if (!this.data.cashSessions.some((session) => !session.closedAt)) throw new Error('cash_session_required');
+      for (const [key, count] of Object.entries(purchase.cashDenominations ?? {})) {
+        if ((this.data.cashRegister[key] ?? 0) < count) throw new Error(`Insufficient cash denomination: ${key}`);
+        this.data.cashRegister[key] = (this.data.cashRegister[key] ?? 0) - count;
       }
+      this.data.transactions.push({ id: this.data.transactions.length + 1, type: 'manual_expense', amount: purchase.total, description: `Compra ${purchase.invoiceReference || purchase.id}`, denominations: purchase.cashDenominations ?? {}, operationId: purchase.operationId, createdBy: purchase.createdBy, created_at: purchase.purchasedAt });
+    }
+    this.data.purchases.push(purchase);
+    await this.save();
+    return true;
+  }
+  async getWasteRecords(): Promise<DbWasteRecord[]> { await this.read(); return this.data.wasteRecords; }
+  async recordWaste(record: DbWasteRecord): Promise<boolean> {
+    return this.serializeMutation(() => this.recordWasteUnsafe(record));
+  }
+
+  private async recordWasteUnsafe(record: DbWasteRecord): Promise<boolean> {
+    await this.read();
+    if (this.data.wasteRecords.some((entry) => entry.operationId === record.operationId)) return false;
+    const inventory = this.data.rawInventory.find((entry) => entry.id === record.ingredientId);
+    if (!inventory) throw new Error(`Inventory item not found: ${record.ingredientId}`);
+    if (inventory.stock < record.quantity) throw new Error(`Insufficient inventory: ${record.ingredientId}`);
+    const valuation = applyWasteValue({ stock: inventory.stock, totalCost: inventory.cost, quantity: record.quantity });
+    inventory.stock = valuation.stock;
+    inventory.cost = valuation.totalCost;
+    const saved = { ...record, costSnapshot: valuation.costSnapshot };
+    this.data.wasteRecords.push(saved);
+    this.data.inventoryMovements.push({
+      id: `${record.id}:${record.ingredientId}`,
+      ingredientId: record.ingredientId,
+      quantity: -record.quantity,
+      movementType: 'WASTE',
+      reason: record.reason,
+      userId: record.userId,
+      operationId: record.operationId,
+      unitCostSnapshot: valuation.unitCost,
+      createdAt: record.createdAt,
+    });
+    await this.save();
+    return true;
+  }
+  async getInventoryMovements(): Promise<DbInventoryMovement[]> { await this.read(); return this.data.inventoryMovements; }
+  async getCashSessions(): Promise<DbCashSession[]> { await this.read(); return [...this.data.cashSessions].sort((a, b) => b.openedAt.localeCompare(a.openedAt)); }
+  async getOpenCashSession(): Promise<DbCashSession | undefined> { await this.read(); return this.data.cashSessions.find((session) => !session.closedAt); }
+  async openCashSession(session: DbCashSession): Promise<boolean> {
+    return this.serializeMutation(() => this.openCashSessionUnsafe(session));
+  }
+
+  private async openCashSessionUnsafe(session: DbCashSession): Promise<boolean> {
+    await this.read();
+    if (this.data.cashSessions.some((entry) => !entry.closedAt)) return false;
+    this.data.cashSessions.push(session);
+    this.data.cashRegister = { ...session.openingDenominations };
+    await this.save();
+    return true;
+  }
+  async closeCashSession(sessionId: string, close: Pick<DbCashSession, 'expectedCash' | 'countedCash' | 'difference' | 'closingDenominations' | 'closedBy' | 'closedAt'>): Promise<boolean> {
+    return this.serializeMutation(() => this.closeCashSessionUnsafe(sessionId, close));
+  }
+
+  private async closeCashSessionUnsafe(sessionId: string, close: Pick<DbCashSession, 'expectedCash' | 'countedCash' | 'difference' | 'closingDenominations' | 'closedBy' | 'closedAt'>): Promise<boolean> {
+    await this.read();
+    const session = this.data.cashSessions.find((entry) => entry.id === sessionId);
+    if (!session || session.closedAt) return false;
+    Object.assign(session, close);
+    this.data.cashRegister = { ...(close.closingDenominations || {}) };
+    await this.save();
+    return true;
+  }
+  async closeCashSessionWithClosing(sessionId: string, close: Pick<DbCashSession, 'expectedCash' | 'countedCash' | 'difference' | 'closingDenominations' | 'closedBy' | 'closedAt'>, closure: DbDailyClosure): Promise<boolean> {
+    return this.serializeMutation(async () => {
+      await this.read();
+      const session = this.data.cashSessions.find((entry) => entry.id === sessionId);
+      if (!session || session.closedAt) return false;
+      Object.assign(session, close);
+      this.data.cashRegister = { ...(close.closingDenominations || {}) };
+      if (!this.data.dailyClosures.some((entry) => entry.id === closure.id)) this.data.dailyClosures.push(closure);
+      await this.save();
+      return true;
     });
   }
-
-  async initialize() {
-    await this.client.connect();
-
-    // Create tables
-    await this.client.query(`
-      CREATE TABLE IF NOT EXISTS inventory (
-        product_id VARCHAR(100) PRIMARY KEY,
-        stock INT NOT NULL DEFAULT 0,
-        cost NUMERIC(10, 2) NOT NULL DEFAULT 0.00
-      );
-    `);
-
-    await this.client.query(`
-      CREATE TABLE IF NOT EXISTS orders (
-        id VARCHAR(50) PRIMARY KEY,
-        customer_name VARCHAR(100) NOT NULL,
-        items TEXT NOT NULL,
-        total NUMERIC(10, 2) NOT NULL,
-        status VARCHAR(50) NOT NULL,
-        payment_method VARCHAR(20) NOT NULL,
-        payment_id VARCHAR(100),
-        payment_intent_id VARCHAR(100),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    await this.client.query(`
-      CREATE TABLE IF NOT EXISTS cash_register (
-        denomination VARCHAR(50) PRIMARY KEY,
-        count INT NOT NULL DEFAULT 0
-      );
-    `);
-
-    await this.client.query(`
-      CREATE TABLE IF NOT EXISTS cash_transactions (
-        id SERIAL PRIMARY KEY,
-        type VARCHAR(50) NOT NULL,
-        amount NUMERIC(10, 2) NOT NULL,
-        description TEXT,
-        denominations TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        status VARCHAR(20) DEFAULT 'active',
-        audit_reason TEXT,
-        original_amount NUMERIC(10, 2)
-      );
-    `);
-
-    // Add columns dynamically in case table already existed before without them
-    await this.client.query(`
-      ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'active';
-      ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS audit_reason TEXT;
-      ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS original_amount NUMERIC(10, 2);
-    `);
-
-    await this.client.query(`
-      CREATE TABLE IF NOT EXISTS bakery_batches (
-        id SERIAL PRIMARY KEY,
-        product_id VARCHAR(100) NOT NULL,
-        quantity INT NOT NULL,
-        added_at TIMESTAMP NOT NULL,
-        expires_at TIMESTAMP NOT NULL
-      );
-    `);
-
-    // Populate default inventory if empty
-    const invCheck = await this.client.query('SELECT COUNT(*) FROM inventory');
-    if (parseInt(invCheck.rows[0].count, 10) === 0) {
-      const defaultInventory = [
-        ['espresso', 50, 8.00],
-        ['double-espresso', 50, 12.00],
-        ['americano', 50, 6.00],
-        ['latte', 50, 14.00],
-        ['flat-white', 50, 16.00],
-        ['matcha-latte', 30, 20.00],
-        ['cold-brew', 40, 10.00],
-        ['iced-latte', 40, 14.00],
-        ['iced-matcha-latte', 30, 20.00],
-        ['croissant-mantequilla', 15, 15.00],
-        ['pain-au-chocolat', 15, 18.00],
-        ['galleta-chocolate', 20, 8.00]
-      ];
-      for (const [id, stock, cost] of defaultInventory) {
-        await this.client.query(
-          'INSERT INTO inventory (product_id, stock, cost) VALUES ($1, $2, $3)',
-          [id, stock, cost]
-        );
+  async getProductionBatches(): Promise<DbProductionBatch[]> { await this.read(); return [...this.data.productionBatches].sort((a, b) => b.producedAt.localeCompare(a.producedAt)); }
+  async recordProductionBatch(batch: DbProductionBatch): Promise<boolean> {
+    return this.serializeMutation(async () => {
+      await this.read();
+      if (this.data.productionBatches.some((entry) => entry.operationId === batch.operationId)) return false;
+      for (const line of batch.consumption) {
+        const inventory = this.data.rawInventory.find((entry) => entry.id === line.ingredientId);
+        if (!inventory || inventory.stock < line.quantity) throw new Error(`Insufficient inventory: ${line.ingredientId}`);
       }
-    }
-
-    // Populate default cash register if empty
-    const cashCheck = await this.client.query('SELECT COUNT(*) FROM cash_register');
-    if (parseInt(cashCheck.rows[0].count, 10) === 0) {
-      const denoms = [
-        'bill_1000', 'bill_500', 'bill_200', 'bill_100', 'bill_50', 'bill_20',
-        'coin_20', 'coin_10', 'coin_5', 'coin_2', 'coin_1', 'coin_0_50', 'coin_0_20'
-      ];
-      for (const d of denoms) {
-        await this.client.query(
-          'INSERT INTO cash_register (denomination, count) VALUES ($1, 0)',
-          [d]
-        );
+      let totalCost = 0;
+      for (const line of batch.consumption) {
+        const inventory = this.data.rawInventory.find((entry) => entry.id === line.ingredientId)!;
+        const valuation = applyWasteValue({ stock: inventory.stock, totalCost: inventory.cost, quantity: line.quantity });
+        inventory.stock = valuation.stock;
+        inventory.cost = valuation.totalCost;
+        totalCost += valuation.costSnapshot;
+        this.data.inventoryMovements.push({ id: `${batch.operationId}:${line.ingredientId}`, ingredientId: line.ingredientId, quantity: -line.quantity, movementType: 'PRODUCTION', reason: `Lote ${batch.id}`, userId: batch.responsibleUserId, operationId: batch.operationId, unitCostSnapshot: valuation.unitCost, createdAt: batch.producedAt });
       }
-    }
-  }
-
-  async getOrders(): Promise<DbOrder[]> {
-    const res = await this.client.query('SELECT * FROM orders ORDER BY created_at ASC');
-    return res.rows.map(row => ({
-      id: row.id,
-      customerName: row.customer_name,
-      items: JSON.parse(row.items),
-      total: parseFloat(row.total),
-      status: row.status,
-      paymentMethod: row.payment_method,
-      paymentId: row.payment_id || undefined,
-      paymentIntentId: row.payment_intent_id || undefined,
-      createdAt: row.created_at.toISOString()
-    }));
-  }
-
-  async createOrder(order: DbOrder): Promise<void> {
-    await this.client.query(
-      `INSERT INTO orders (id, customer_name, items, total, status, payment_method, payment_id, payment_intent_id, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-      [
-        order.id,
-        order.customerName,
-        JSON.stringify(order.items),
-        order.total,
-        order.status,
-        order.paymentMethod,
-        order.paymentId || null,
-        order.paymentIntentId || null,
-        new Date(order.createdAt)
-      ]
-    );
-
-    // Decrement stock in database
-    for (const item of order.items) {
-      await this.client.query(
-        'UPDATE inventory SET stock = GREATEST(0, stock - $1) WHERE product_id = $2',
-        [item.quantity, item.product.id]
-      );
-    }
-  }
-
-  async updateOrderStatus(orderId: string, status: string, paymentId?: string): Promise<void> {
-    if (paymentId) {
-      await this.client.query(
-        'UPDATE orders SET status = $1, payment_id = $2 WHERE id = $3',
-        [status, paymentId, orderId]
-      );
-    } else {
-      await this.client.query(
-        'UPDATE orders SET status = $1 WHERE id = $2',
-        [status, orderId]
-      );
-    }
-  }
-
-  async clearOrders(): Promise<void> {
-    await this.client.query('DELETE FROM orders');
-  }
-
-  async getInventory(): Promise<DbInventoryItem[]> {
-    const res = await this.client.query('SELECT * FROM inventory');
-    return res.rows.map(row => ({
-      product_id: row.product_id,
-      stock: parseInt(row.stock, 10),
-      cost: parseFloat(row.cost)
-    }));
-  }
-
-  async updateInventory(productId: string, stock: number, cost: number): Promise<void> {
-    await this.client.query(
-      `INSERT INTO inventory (product_id, stock, cost)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (product_id)
-       DO UPDATE SET stock = EXCLUDED.stock, cost = EXCLUDED.cost`,
-      [productId, stock, cost]
-    );
-  }
-
-  async getRawInventory(): Promise<import('./db').DbRawInventory[]> {
-    return [];
-  }
-  async updateRawInventory(id: string, stock: number, cost: number): Promise<void> {}
-  async createRawInventoryItem(item: import('./db').DbRawInventory): Promise<void> {}
-  async getProducts(): Promise<DbProduct[]> { return []; }
-  async createProduct(product: DbProduct): Promise<void> {}
-  async updateProduct(id: string, product: Partial<DbProduct>): Promise<void> {}
-  async deleteProduct(id: string): Promise<void> {}
-  async uploadProductImage(f: string, b: Buffer, m: string): Promise<string> { return ''; }
-  async updateProductPrice(id: string, price: number): Promise<void> {}
-  async updateProductRecipe(productId: string, recipe: Record<string, number>): Promise<void> {}
-
-  async getCashRegister(): Promise<Record<string, number>> {
-    const res = await this.client.query('SELECT * FROM cash_register');
-    const reg: Record<string, number> = {};
-    res.rows.forEach(row => {
-      reg[row.denomination] = parseInt(row.count, 10);
+      const netQuantity = batch.quantityProduced - batch.wasteQuantity;
+      const finished = this.data.inventory.find((entry) => entry.product_id === batch.productId);
+      if (finished) {
+        const previousValue = finished.stock * finished.cost;
+        finished.stock += netQuantity;
+        finished.cost = finished.stock > 0 ? (previousValue + totalCost) / finished.stock : 0;
+      } else this.data.inventory.push({ product_id: batch.productId, stock: netQuantity, cost: netQuantity > 0 ? totalCost / netQuantity : 0 });
+      this.data.productionBatches.push({ ...batch, totalCost: toRoundedMoney(totalCost) });
+      await this.save();
+      return true;
     });
-    return reg;
-  }
-
-  async adjustCashRegister(denominations: Record<string, number>): Promise<void> {
-    let totalAdjusted = 0;
-    const values: Record<string, number> = {
-      bill_1000: 1000, bill_500: 500, bill_200: 200, bill_100: 100, bill_50: 50, bill_20: 20,
-      coin_20: 20, coin_10: 10, coin_5: 5, coin_2: 2, coin_1: 1, coin_0_50: 0.5, coin_0_20: 0.2
-    };
-
-    for (const [denom, count] of Object.entries(denominations)) {
-      await this.client.query(
-        `INSERT INTO cash_register (denomination, count)
-         VALUES ($1, $2)
-         ON CONFLICT (denomination)
-         DO UPDATE SET count = EXCLUDED.count`,
-        [denom, count]
-      );
-      totalAdjusted += count * (values[denom] || 0);
-    }
-
-    // Add transaction log
-    await this.client.query(
-      `INSERT INTO cash_transactions (type, amount, description, denominations)
-       VALUES ($1, $2, $3, $4)`,
-      ['adjustment', totalAdjusted, 'Ajuste manual del administrador', JSON.stringify(denominations)]
-    );
-  }
-
-  async addCashTransaction(transaction: DbCashTransaction): Promise<void> {
-    await this.client.query(
-      `INSERT INTO cash_transactions (type, amount, description, denominations)
-       VALUES ($1, $2, $3, $4)`,
-      [
-        transaction.type,
-        transaction.amount,
-        transaction.description,
-        JSON.stringify(transaction.denominations)
-      ]
-    );
-
-    // Update register counts
-    const multiplier = (transaction.type === 'change' || transaction.type === 'manual_expense' || transaction.type === 'manual_investment') ? -1 : 1;
-    for (const [denom, count] of Object.entries(transaction.denominations)) {
-      await this.client.query(
-        `INSERT INTO cash_register (denomination, count)
-         VALUES ($1, $2)
-         ON CONFLICT (denomination)
-         DO UPDATE SET count = GREATEST(0, cash_register.count + ($2 * ${multiplier}))`,
-        [denom, count]
-      );
-    }
-  }
-
-  async getTransactionLedger(): Promise<DbCashTransaction[]> {
-    const res = await this.client.query('SELECT * FROM cash_transactions ORDER BY created_at DESC');
-    return res.rows.map(row => ({
-      id: row.id,
-      type: row.type,
-      amount: parseFloat(row.amount),
-      description: row.description,
-      denominations: JSON.parse(row.denominations),
-      created_at: row.created_at.toISOString(),
-      status: row.status,
-      audit_reason: row.audit_reason,
-      original_amount: row.original_amount ? parseFloat(row.original_amount) : undefined
-    }));
-  }
-
-  async updateCashTransaction(id: number, status: 'deleted' | 'modified', auditReason: string, newAmount?: number): Promise<void> {
-    if (status === 'modified' && newAmount !== undefined) {
-      await this.client.query(
-        'UPDATE cash_transactions SET status = $1, audit_reason = $2, original_amount = amount, amount = $3 WHERE id = $4',
-        [status, auditReason, newAmount, id]
-      );
-    } else {
-      await this.client.query(
-        'UPDATE cash_transactions SET status = $1, audit_reason = $2 WHERE id = $3',
-        [status, auditReason, id]
-      );
-    }
-  }
-
-  async getBakeryBatches(): Promise<DbBakeryBatch[]> {
-    const res = await this.client.query('SELECT * FROM bakery_batches ORDER BY added_at ASC');
-    return res.rows.map(row => ({
-      id: row.id,
-      product_id: row.product_id,
-      quantity: parseInt(row.quantity, 10),
-      added_at: row.added_at.toISOString(),
-      expires_at: row.expires_at.toISOString()
-    }));
-  }
-
-  async addBakeryBatch(batch: DbBakeryBatch): Promise<void> {
-    await this.client.query(
-      `INSERT INTO bakery_batches (product_id, quantity, added_at, expires_at)
-       VALUES ($1, $2, $3, $4)`,
-      [
-        batch.product_id,
-        batch.quantity,
-        new Date(batch.added_at),
-        new Date(batch.expires_at)
-      ]
-    );
-  }
-
-  async getDailyClosures(): Promise<DbDailyClosure[]> {
-    const res = await this.client.query('SELECT * FROM daily_closures ORDER BY closed_at DESC');
-    return res.rows.map(row => ({
-      id: row.id,
-      closed_at: row.closed_at,
-      total_sales: parseFloat(row.total_sales),
-      total_income: parseFloat(row.total_income),
-      total_costs: parseFloat(row.total_costs),
-      net_profit: parseFloat(row.net_profit),
-      cash_start: parseFloat(row.cash_start),
-      cash_end: parseFloat(row.cash_end),
-      products_sold: typeof row.products_sold === 'string' ? JSON.parse(row.products_sold) : row.products_sold,
-      notes: row.notes
-    }));
-  }
-
-  async createDailyClosure(closure: DbDailyClosure): Promise<void> {
-    await this.client.query(
-      `INSERT INTO daily_closures (closed_at, total_sales, total_income, total_costs, net_profit, cash_start, cash_end, products_sold, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-      [
-        new Date(closure.closed_at),
-        closure.total_sales,
-        closure.total_income,
-        closure.total_costs,
-        closure.net_profit,
-        closure.cash_start,
-        closure.cash_end,
-        JSON.stringify(closure.products_sold),
-        closure.notes || null
-      ]
-    );
   }
 }
+
+function toRoundedMoney(value: number): number { return Math.round((value + Number.EPSILON) * 100) / 100; }
 
 // Export singleton instance based on environment variables
-const connectionString = process.env.DATABASE_URL;
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
+const configuredEnv = getEnv();
+const supabaseUrl = configuredEnv.SUPABASE_URL;
+const supabaseKey = configuredEnv.SUPABASE_SERVICE_KEY;
 
 export const db: DbAdapter = (supabaseUrl && supabaseKey) 
   ? new SupabaseDbAdapter(supabaseUrl, supabaseKey) 
-  : (connectionString ? new PostgresDbAdapter(connectionString) : new JsonDbAdapter());
+  : new JsonDbAdapter();

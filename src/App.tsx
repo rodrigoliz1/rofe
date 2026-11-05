@@ -1,300 +1,193 @@
-import { useState, useEffect } from 'react';
-import type { Product, CartItem, Order, OrderStatus } from './types';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import type { CartItem, Order, OrderStatus, Product } from './types';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { Catalog } from './components/Catalog';
 import { Cart } from './components/Cart';
 import { ProductModal } from './components/ProductModal';
 import { CheckoutModal } from './components/CheckoutModal';
-import { BaristaView } from './components/BaristaView';
 import { PasswordPromptModal } from './components/PasswordPromptModal';
-import { AdminView } from './components/AdminView';
+import { DeviceSetup } from './components/DeviceSetup';
+import { ConnectionStatus } from './components/ConnectionStatus';
+import { ApiError, ConnectionError, apiFetch, loginDevice, logout, publicError, tryRestoreSession } from './services/api';
+import { cachedCatalog, saveCatalog, getDeviceCredentials } from './services/offline';
+import { useOutbox } from './hooks/useOutbox';
+import { readCheckout } from './services/checkout';
+import { UiIcon } from './components/UiIcon';
+import { subscribeToEvents } from './services/events';
 
-function App() {
-  const [started, setStarted] = useState(false);
+const BaristaView = lazy(() => import('./components/BaristaView').then((module) => ({ default: module.BaristaView })));
+const AdminView = lazy(() => import('./components/AdminView').then((module) => ({ default: module.AdminView })));
+
+type ViewMode = 'client' | 'barista' | 'admin';
+type DeviceState = 'loading' | 'setup' | 'ready' | 'restore-error';
+
+interface RofeEvent { type: string; orderId?: string; order?: Order }
+
+function App({ kiosk = false }: { kiosk?: boolean }) {
+  const [deviceState, setDeviceState] = useState<DeviceState>('loading');
+  const [started, setStarted] = useState(() => Boolean(readCheckout()));
   const [selectedCategory, setSelectedCategory] = useState<'all' | 'coffee' | 'cold' | 'bakery'>('all');
-  const [cart, setCart] = useState<CartItem[]>([]);
+  const [cart, setCart] = useState<CartItem[]>(() => readCheckout()?.cartItems ?? []);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  
-  // Dynamic Product Catalog
   const [productCatalog, setProductCatalog] = useState<Product[]>([]);
-  const [showCheckout, setShowCheckout] = useState(false);
-  const [viewMode, setViewMode] = useState<'client' | 'barista' | 'admin'>('client');
+  const [showCheckout, setShowCheckout] = useState(() => Boolean(readCheckout()));
+  const [viewMode, setViewMode] = useState<ViewMode>('client');
   const [orders, setOrders] = useState<Order[]>([]);
   const [showPasswordPrompt, setShowPasswordPrompt] = useState(false);
+  const [online, setOnline] = useState(navigator.onLine);
+  const [realtime, setRealtime] = useState(false);
+  const outbox = useOutbox(deviceState === 'ready' && viewMode === 'client');
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [appError, setAppError] = useState('');
 
-  // API URL Helper
-  const getApiUrl = (path: string) => {
-    const base = import.meta.env.VITE_API_URL || 
-                 (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('192.168.')
-                   ? `http://${window.location.hostname}:3000`
-                   : window.location.origin);
-    return `${base}${path}`;
-  };
-
-  const loadProducts = async () => {
+  const loadProducts = useCallback(async () => {
     try {
-      const res = await fetch(getApiUrl('/api/products'));
-      if (res.ok) {
-        const data = await res.json();
-        data.sort((a: any, b: any) => a.name.localeCompare(b.name));
-        setProductCatalog(data);
-      }
-    } catch (e) {
-      console.error('Error fetching products:', e);
+      const response = await apiFetch('/api/products');
+      if (!response.ok) throw new Error(await publicError(response));
+      const data = await response.json() as Product[];
+      setProductCatalog([...data].sort((left, right) => left.name.localeCompare(right.name, 'es')));
+      setAppError('');
+      await saveCatalog(data);
+    } catch (cause) {
+      const cached = await cachedCatalog().catch(() => []);
+      if (cached.length) setProductCatalog(cached);
+      setAppError(cached.length ? 'Menú guardado en el dispositivo. Los precios se verificarán al reconectar.' : cause instanceof Error ? cause.message : 'No pudimos cargar el menú.');
+    } finally { setCatalogLoading(false); }
+  }, []);
+
+  const loadOrders = useCallback(async () => {
+    const response = await apiFetch('/api/orders');
+    if (!response.ok) throw new Error(await publicError(response));
+    setOrders(await response.json() as Order[]);
+  }, []);
+
+  const restoreDeviceSession = useCallback(async () => {
+    const restored = kiosk ? null : await tryRestoreSession();
+    if (restored) {
+      setViewMode(restored.role === 'BARISTA' ? 'barista' : restored.role === 'POS_DEVICE' ? 'client' : 'admin');
+      setDeviceState('ready');
+      return true;
     }
-  };
-
-  const loadOrders = async () => {
-    try {
-      const res = await fetch(getApiUrl('/api/orders'));
-      if (res.ok) {
-        setOrders(await res.json());
-      }
-    } catch (e) {
-      console.error('Error fetching orders:', e);
-    }
-  };
-
-  const loadInventory = async () => {
-    // Inventory loading is now handled in AdminView
-  };
-
-  // Sync Manager: Periodically attempt to sync offline orders
-  useEffect(() => {
-    const syncOfflineData = async () => {
-      if (!navigator.onLine) return;
-      
-      const offlineQueueStr = localStorage.getItem('motocarro_offline_sync');
-      if (!offlineQueueStr) return;
-      
-      const offlineQueue = JSON.parse(offlineQueueStr);
-      const readyToSync = offlineQueue.filter((item: any) => !item.isPendingPayment);
-      
-      if (readyToSync.length === 0) return;
-
+    let credentials: Awaited<ReturnType<typeof getDeviceCredentials>>;
+    try { credentials = await getDeviceCredentials(); }
+    catch { setDeviceState('restore-error'); return false; }
+    if (credentials) {
       try {
-        console.log(`Intentando sincronizar ${readyToSync.length} transacciones offline...`);
-        const response = await fetch(getApiUrl('/api/orders/sync'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ syncData: readyToSync })
-        });
-        
-        if (response.ok) {
-          console.log('Sincronización exitosa.');
-          const syncedIds = readyToSync.map((item: any) => item.order.id);
-          const remainingQueue = offlineQueue.filter((item: any) => !syncedIds.includes(item.order.id));
-          
-          if (remainingQueue.length === 0) {
-            localStorage.removeItem('motocarro_offline_sync');
-          } else {
-            localStorage.setItem('motocarro_offline_sync', JSON.stringify(remainingQueue));
-          }
+        await loginDevice(credentials.deviceId, credentials.deviceToken);
+        setDeviceState('ready'); return true;
+      } catch (cause) {
+        if (cause instanceof ConnectionError) {
+          setAppError('Sin conexión con el servidor. Puedes registrar pedidos en efectivo para sincronizarlos después.');
+          setDeviceState('ready'); return true;
         }
-      } catch (error) {
-        console.error('Error al sincronizar datos offline', error);
+        if (!(cause instanceof ApiError) || (cause.status !== 401 && cause.status !== 403)) {
+          setDeviceState('restore-error'); return false;
+        }
       }
-    };
-
-    window.addEventListener('online', syncOfflineData);
-    const interval = setInterval(syncOfflineData, 30000);
-    syncOfflineData();
-
-    return () => {
-      window.removeEventListener('online', syncOfflineData);
-      clearInterval(interval);
-    };
-  }, []);
-
-  // Fetch initial data
-  useEffect(() => {
-    loadProducts();
-    loadOrders();
-    loadInventory();
-    
-    const savedOrders = localStorage.getItem('motocarro_orders');
-    if (savedOrders) {
-      setOrders(JSON.parse(savedOrders));
     }
-  }, []);
+    setDeviceState('setup'); return false;
+  }, [kiosk]);
 
-  // Set up SSE for real-time updates
+  useEffect(() => { void restoreDeviceSession(); }, [restoreDeviceSession]);
+  useEffect(() => { void loadProducts(); }, [loadProducts]);
   useEffect(() => {
-    const eventSource = new EventSource(getApiUrl('/api/events'));
+    const onOnline = () => { setOnline(true); void loadProducts(); };
+    const onOffline = () => setOnline(false);
+    window.addEventListener('online', onOnline); window.addEventListener('offline', onOffline);
+    return () => { window.removeEventListener('online', onOnline); window.removeEventListener('offline', onOffline); };
+  }, [loadProducts]);
 
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === 'connected') return;
-
-        if (data.type === 'order_paid' || data.type === 'order_updated') {
-          setOrders((prev) => {
-            const index = prev.findIndex((o) => o.id === data.orderId);
-            let newOrders = index > -1 ? prev.map((o) => (o.id === data.orderId ? data.order : o)) : [...prev, data.order];
-            localStorage.setItem('motocarro_orders', JSON.stringify(newOrders));
-            return newOrders;
-          });
-          loadInventory();
-        } else if (data.type === 'inventory_updated') {
-          loadProducts();
-        } else if (data.type === 'clear_all') {
-          setOrders([]);
-          localStorage.removeItem('motocarro_orders');
-        } 
-      } catch (e) {
-        console.error('Error parsing SSE event:', e);
+  useEffect(() => {
+    if (deviceState !== 'ready') return;
+    return subscribeToEvents((rawEvent) => {
+      const event = rawEvent as RofeEvent;
+      if ((event.type === 'order_paid' || event.type === 'order_updated') && event.order) {
+        setOrders((current) => current.some((order) => order.id === event.orderId)
+          ? current.map((order) => order.id === event.orderId ? event.order! : order)
+          : [...current, event.order!]);
+      } else if (event.type === 'inventory_updated') {
+        void loadProducts();
       }
-    };
+    }, (connected) => {
+      setRealtime(connected);
+      if (connected && viewMode !== 'client') void loadOrders().catch(() => setAppError('No pudimos recuperar los pedidos. Reintenta la conexión.'));
+    });
+  }, [deviceState, loadProducts, loadOrders, viewMode]);
 
-    return () => eventSource.close();
-  }, []);
-
-  const handleStart = () => setStarted(true);
-  const handleSelectCategory = (category: 'all' | 'coffee' | 'cold' | 'bakery') => setSelectedCategory(category);
-  const handleProductClick = (product: Product) => setSelectedProduct(product);
+  useEffect(() => {
+    if (viewMode !== 'client') void loadOrders().catch((cause: unknown) => setAppError(cause instanceof Error ? cause.message : 'No pudimos cargar los pedidos.'));
+  }, [loadOrders, viewMode]);
 
   const handleAddToCart = (item: CartItem) => {
-    setCart((prevCart) => {
-      const existingItemIndex = prevCart.findIndex((i) => i.id === item.id);
-      if (existingItemIndex > -1) {
-        const newCart = [...prevCart];
-        const currentItem = newCart[existingItemIndex];
-        const newQty = currentItem.quantity + item.quantity;
-        newCart[existingItemIndex] = { ...currentItem, quantity: newQty, totalPrice: (currentItem.totalPrice / currentItem.quantity) * newQty };
-        return newCart;
-      }
-      return [...prevCart, item];
+    setCart((current) => {
+      const index = current.findIndex((candidate) => candidate.id === item.id);
+      if (index < 0) return [...current, item];
+      const next = [...current];
+      const existing = next[index];
+      const quantity = Math.min(50, existing.quantity + item.quantity);
+      next[index] = { ...existing, quantity, totalPrice: (existing.totalPrice / existing.quantity) * quantity };
+      return next;
     });
     setSelectedProduct(null);
   };
 
-  const handleRemoveItem = (itemId: string) => setCart((prevCart) => prevCart.filter((item) => item.id !== itemId));
-
-  const handleUpdateQty = (itemId: string, newQty: number) => {
-    if (newQty <= 0) {
-      handleRemoveItem(itemId);
+  const updateQuantity = (itemId: string, quantity: number) => {
+    if (quantity <= 0) {
+      setCart((current) => current.filter((item) => item.id !== itemId));
       return;
     }
-    setCart((prevCart) =>
-      prevCart.map((item) => {
-        if (item.id === itemId) {
-          const unitPrice = item.totalPrice / item.quantity;
-          return { ...item, quantity: newQty, totalPrice: unitPrice * newQty };
-        }
-        return item;
-      })
-    );
+    quantity = Math.min(50, quantity);
+    setCart((current) => current.map((item) => item.id === itemId
+      ? { ...item, quantity, totalPrice: (item.totalPrice / item.quantity) * quantity }
+      : item));
   };
 
-  const handleCheckout = () => setShowCheckout(true);
-  const handleCancelOrder = () => setCart([]);
-  const handlePaymentSuccess = () => {
-    setCart([]);
-    setShowCheckout(false);
-    setStarted(false);
-    loadInventory();
+  const updateOrderStatus = async (orderId: string, status: OrderStatus) => {
+    const response = await apiFetch(`/api/orders/${encodeURIComponent(orderId)}/status`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }),
+    });
+    if (!response.ok) throw new Error(await publicError(response));
   };
 
-  const handleUpdateOrderStatus = async (orderId: string, newStatus: OrderStatus) => {
-    try {
-      await fetch(getApiUrl(`/api/orders/${encodeURIComponent(orderId)}/status`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus }),
-      });
-    } catch (error) {
-      console.error('Error actualizando estado:', error);
-    }
+  const closeStaffView = async () => {
+    await logout().catch(() => undefined);
+    setOrders([]); setViewMode('client'); setStarted(false); setDeviceState('loading');
+    const device = await getDeviceCredentials().catch(() => undefined);
+    if (!device) { setDeviceState('setup'); return; }
+    try { await loginDevice(device.deviceId, device.deviceToken); setDeviceState('ready'); }
+    catch (cause) { setDeviceState(cause instanceof ConnectionError ? 'ready' : cause instanceof ApiError && (cause.status === 401 || cause.status === 403) ? 'setup' : 'restore-error'); }
   };
 
-  const handleClearOrders = async () => {
-    try {
-      await fetch(getApiUrl('/api/orders/clear'), { method: 'POST' });
-    } catch (error) {
-      console.error('Error al borrar pedidos:', error);
-    }
-  };
-
-  const checkoutTotal = cart.reduce((acc, item) => acc + item.totalPrice, 0);
+  if (deviceState === 'loading') return <main className="app-loading"><span>Preparando ROFE…</span></main>;
+  if (deviceState === 'restore-error') return <main className="device-setup" id="main-content"><section className="device-setup-panel" aria-labelledby="restore-title"><div className="setup-brand">ROFÉ.</div><h1 id="restore-title">No pudimos conectar la terminal</h1><p>No es necesario volver a registrarla. Comprueba que el servidor de ROFÉ esté encendido y vuelve a intentarlo. Si el problema continúa, revisa que el navegador permita guardar datos del sitio.</p><button type="button" onClick={() => { setDeviceState('loading'); void restoreDeviceSession(); }}>Reintentar conexión</button><button className="setup-staff-access" type="button" onClick={() => setShowPasswordPrompt(true)}>Entrar con una cuenta de equipo</button>{showPasswordPrompt && <PasswordPromptModal onClose={() => setShowPasswordPrompt(false)} onSuccess={(mode) => { setViewMode(mode); setDeviceState('ready'); setShowPasswordPrompt(false); }} />}</section></main>;
+  if (deviceState === 'setup') return <>
+    <DeviceSetup onReady={() => setDeviceState('ready')} onStaffAccess={() => setShowPasswordPrompt(true)} />
+    {showPasswordPrompt && <PasswordPromptModal onClose={() => setShowPasswordPrompt(false)} onSuccess={(mode) => { setViewMode(mode); setDeviceState('ready'); setShowPasswordPrompt(false); }} />}
+  </>;
 
   return (
     <div className="app-container">
-      {viewMode === 'barista' && (
-        <BaristaView
-          orders={orders}
-          onUpdateOrderStatus={handleUpdateOrderStatus}
-          onClearOrders={handleClearOrders}
-          onClose={() => setViewMode('client')}
-        />
-      )}
+      <a className="skip-link" href="#main-content">Saltar al contenido</a>
+      <ConnectionStatus online={online} realtime={realtime} pending={outbox.pending} error={outbox.error} onRetry={() => void outbox.retry()} />
+      {appError && <div className="app-alert" role="alert">{appError}<button onClick={() => void loadProducts()}>Reintentar</button><button onClick={() => setAppError('')} aria-label="Cerrar mensaje">×</button></div>}
 
-      {viewMode === 'admin' && (
-        <AdminView
-          products={productCatalog}
-          onClose={() => setViewMode('client')}
-          onInventoryUpdate={loadProducts}
-        />
-      )}
+      <Suspense fallback={<main className="app-loading"><span>Abriendo módulo…</span></main>}>
+        {viewMode === 'barista' && <BaristaView orders={orders} onUpdateOrderStatus={updateOrderStatus} onClose={() => void closeStaffView()} />}
+        {viewMode === 'admin' && <AdminView products={productCatalog} onClose={() => void closeStaffView()} onInventoryUpdate={loadProducts} onOpenBarista={() => setViewMode('barista')} />}
+      </Suspense>
 
-      {viewMode === 'client' && (
-        <>
-          {!started && (
-            <WelcomeScreen
-              onStart={handleStart}
-              onAdminClick={() => setShowPasswordPrompt(true)}
-            />
-          )}
-
-          {started && (
-            <div className="pos-layout">
-              <Catalog 
-                products={productCatalog.filter(p => selectedCategory === 'all' || p.category === selectedCategory)} 
-                onSelectCategory={handleSelectCategory}
-                selectedCategory={selectedCategory}
-                onProductClick={handleProductClick}
-              />
-              <Cart
-                cart={cart}
-                onRemoveItem={handleRemoveItem}
-                onUpdateQty={handleUpdateQty}
-                onCheckout={handleCheckout}
-                onCancelOrder={handleCancelOrder}
-              />
-            </div>
-          )}
-
-          {/* Customization Modal */}
-          {selectedProduct && (
-            <ProductModal
-              product={selectedProduct}
-              onClose={() => setSelectedProduct(null)}
-              onAddToCart={handleAddToCart}
-            />
-          )}
-
-          {/* Checkout Modal */}
-          {showCheckout && (
-            <CheckoutModal
-              total={checkoutTotal}
-              cartItems={cart}
-              orders={orders}
-              onPaymentSuccess={handlePaymentSuccess}
-              onClose={() => setShowCheckout(false)}
-            />
-          )}
-
-          {/* Password Prompt Modal */}
-          {showPasswordPrompt && (
-            <PasswordPromptModal
-              onClose={() => setShowPasswordPrompt(false)}
-              onSuccess={(mode) => {
-                setViewMode(mode);
-                setShowPasswordPrompt(false);
-              }}
-            />
-          )}
-        </>
-      )}
+      {viewMode === 'client' && <main id="main-content">
+        {!started && <WelcomeScreen onStart={() => setStarted(true)} onAdminClick={() => setShowPasswordPrompt(true)} />}
+        {started && <>
+          <header className="pos-toolbar"><button className="pos-brand" onClick={() => setStarted(false)} aria-label="Volver al inicio">ROFÉ<span>.</span></button><span className="pos-toolbar-label">Espresso bar · Hazlo a tu gusto</span><button className="toolbar-action" title="Panel Barista" onClick={() => setShowPasswordPrompt(true)}><UiIcon name="users" />Equipo</button></header>
+          <div className="pos-layout">
+          <Catalog products={productCatalog} onSelectCategory={setSelectedCategory} selectedCategory={selectedCategory} onProductClick={setSelectedProduct} loading={catalogLoading} onRetry={() => void loadProducts()} />
+          <Cart cart={cart} onRemoveItem={(id) => setCart((current) => current.filter((item) => item.id !== id))} onUpdateQty={updateQuantity} onCheckout={() => setShowCheckout(true)} onCancelOrder={() => setCart([])} />
+        </div></>}
+        {selectedProduct && <ProductModal product={selectedProduct} onClose={() => setSelectedProduct(null)} onAddToCart={handleAddToCart} />}
+        {showCheckout && <CheckoutModal total={cart.reduce((sum, item) => sum + item.totalPrice, 0)} cartItems={cart} orders={orders} onPaymentSuccess={() => { setCart([]); setShowCheckout(false); setStarted(false); }} onClose={() => setShowCheckout(false)} />}
+        {showPasswordPrompt && <PasswordPromptModal onClose={() => setShowPasswordPrompt(false)} onSuccess={(mode) => { setViewMode(mode); setShowPasswordPrompt(false); }} />}
+      </main>}
     </div>
   );
 }

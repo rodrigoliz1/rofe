@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+      - name: Install frontend
+        run: npm ci
+      - name: Install backend
+        run: npm --prefix backend ci
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck frontend
+        run: npm run typecheck
+      - name: Typecheck backend
+        run: npm --prefix backend run typecheck
+      - name: Unit and security tests
+        run: npm test && npm --prefix backend test
+      - name: Build backend
+        run: npm --prefix backend run build
+      - name: Build frontend
+        run: npm run build
+      - name: Audit production dependencies
+        run: npm audit --omit=dev && npm --prefix backend audit --omit=dev
+      - name: Install browser
+        run: npx playwright install --with-deps chromium
+      - name: Browser critical flows
+        run: npm run test:e2e
+      - name: Install isolated PostgreSQL test tools
+        run: sudo apt-get update && sudo apt-get install -y postgresql
+      - name: PostgreSQL transactional checks
+        run: PATH="$(pg_config --bindir):$PATH" npm --prefix backend run test:db
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rofe-browser-evidence
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

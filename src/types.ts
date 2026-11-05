@@ -40,18 +40,29 @@ export interface CartItem {
   totalPrice: number;
 }
 
-export type OrderStatus = 'pending_payment' | 'pending_cash_payment' | 'paid' | 'preparing' | 'ready' | 'completed' | 'cancelled' | 'rejected';
+export type OrderStatus = 'DRAFT' | 'PENDING_PAYMENT' | 'PAID' | 'IN_PREPARATION' | 'READY' | 'COMPLETED' | 'CANCELLED' | 'REFUNDED';
+export type PaymentStatus = 'NOT_REQUIRED' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'REFUNDED';
 
 export interface Order {
   id: string;
+  folio?: string;
+  operationId?: string;
+  deviceId?: string;
+  channel?: 'POS' | 'QR_PICKUP';
+  paymentProvider?: 'MERCADO_PAGO' | 'STRIPE';
+  pickup?: { standId: string; locationName: string; locationAddress: string };
   items: CartItem[];
+  subtotal?: number;
+  discount?: number;
+  tax?: number;
   total: number;
   status: OrderStatus;
+  paymentStatus?: PaymentStatus;
   createdAt: string;
   customerName?: string;
   paymentMethod: 'card' | 'cash';
   paymentId?: string;
   paymentIntentId?: string;
+  notes?: string;
+  cancellationReason?: string;
 }
-
-

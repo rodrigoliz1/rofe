@@ -1,0 +1,15 @@
+.payment-outcome-icon { position: relative; display: grid; place-items: center; width: 112px; height: 112px; margin: 0 auto 16px; color: #b8d9a7; }
+.payment-outcome-icon--failure { color: #f0a49b; }
+.payment-outcome-halo { position: absolute; inset: 5px; border: 1px solid currentColor; border-radius: 50%; opacity: .28; }
+.payment-outcome-disc { display: grid; place-items: center; width: 76px; height: 76px; border: 1px solid currentColor; border-radius: 50%; background: #26382b; box-shadow: 0 0 0 9px rgba(184, 217, 167, .06); }
+.payment-outcome-icon--failure .payment-outcome-disc { background: #3a2726; box-shadow: 0 0 0 9px rgba(240, 164, 155, .06); }
+.payment-outcome-disc svg { width: 42px; height: 42px; }
+.payment-outcome-content { animation: payment-outcome-enter 260ms cubic-bezier(.23, 1, .32, 1) both; }
+.payment-outcome-icon .payment-outcome-disc { animation: payment-outcome-disc 260ms cubic-bezier(.23, 1, .32, 1) both; }
+.payment-outcome-icon .payment-outcome-halo { animation: payment-outcome-halo 260ms cubic-bezier(.23, 1, .32, 1) both; }
+.payment-sound-replay { border: 0; background: transparent; color: inherit; text-decoration: underline; cursor: pointer; padding: 10px; }
+.pickup-receipt .payment-outcome-icon { margin: 0 0 24px; }
+@keyframes payment-outcome-enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes payment-outcome-disc { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: scale(1); } }
+@keyframes payment-outcome-halo { from { opacity: 0; transform: scale(.92); } to { opacity: .28; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .payment-outcome-content, .payment-outcome-icon .payment-outcome-disc, .payment-outcome-icon .payment-outcome-halo { animation: none; } }

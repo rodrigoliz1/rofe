@@ -91,7 +91,7 @@ export const Cart: React.FC<CartProps> = ({
               <line x1="15" y1="9" x2="15.01" y2="9" strokeWidth="2" strokeLinecap="round" />
             </svg>
             <p className="empty-cart-title">Comienza tu orden</p>
-            <p className="empty-cart-desc">Selecciona productos del menú de la izquierda</p>
+            <p className="empty-cart-desc">Elige algo del menú para comenzar.</p>
           </div>
         ) : (
           cart.map((item) => (
@@ -108,6 +108,7 @@ export const Cart: React.FC<CartProps> = ({
                 <div className="cart-item-qty">
                   <button
                     className="cart-qty-btn"
+                    aria-label={`Quitar una unidad de ${item.product.name}`}
                     onClick={() => onUpdateQty(item.id, item.quantity - 1)}
                   >
                     -
@@ -115,6 +116,7 @@ export const Cart: React.FC<CartProps> = ({
                   <span className="cart-qty-value">{item.quantity}</span>
                   <button
                     className="cart-qty-btn"
+                    aria-label={`Agregar una unidad de ${item.product.name}`} disabled={item.quantity >= 50}
                     onClick={() => onUpdateQty(item.id, item.quantity + 1)}
                   >
                     +
@@ -139,7 +141,7 @@ export const Cart: React.FC<CartProps> = ({
           disabled={cart.length === 0}
           onClick={onCheckout}
         >
-          <span>PAGAR CON TARJETA</span>
+          <span>CONTINUAR AL PAGO</span>
           <svg
             className="checkout-arrow"
             width="20"
