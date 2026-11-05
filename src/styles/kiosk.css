@@ -1,5 +1,387 @@
-.kiosk-shell { display: flex; flex-direction: column; width: 100%; height: 100dvh; min-height: 0; overflow: hidden; }
-.kiosk-shell > .app-container { flex: 1; min-height: 0; }
+/* ============================================================
+   ROFÉ KIOSK — self-service terminal (/kiosk)
+   Everything is scoped to .kiosk-shell, so POS, admin and KDS are untouched.
+
+   Layout model (root cause of the old tablet issues):
+   - The page is a fixed-height grid (100dvh) whose regions scroll internally;
+     nothing scrolls the page, so the CTA row can never be pushed off-screen.
+   - Safe areas are applied once, on the terminal and on fixed overlays.
+     Inside the Android shell the native view already pads system bars, so
+     env(safe-area-inset-*) resolves to 0 there; in Chrome/PWA it is the real inset.
+   - The catalog always uses the whole area below the header. «TU PEDIDO» in the
+     header opens the order as an overlay: right drawer in landscape, bottom sheet in
+     portrait. Closed, it takes no space at all.
+   - Which one applies is decided by useStackedLayout() (data-stacked), from the
+     physical screen orientation: the keyboard shrinking a portrait viewport into
+     a landscape-shaped one must not flip the layout while the customer types.
+   ============================================================ */
+
+html.kiosk-mode,
+html.kiosk-mode body {
+  overscroll-behavior: none;
+  /* Panning stays native; pinch-zoom and double-tap zoom do not exist. */
+  touch-action: pan-x pan-y;
+}
+
+.kiosk-shell {
+  --k-gap: clamp(12px, 1.4vmin + 6px, 24px);
+  --k-radius: 18px;
+  --k-tap: 56px;
+  --k-ease: cubic-bezier(0.2, 0, 0, 1);
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-primary);
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.kiosk-shell img { -webkit-user-drag: none; user-select: none; }
+.kiosk-shell input,
+.kiosk-shell textarea,
+.kiosk-shell select {
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
+  /* 16px+ keeps mobile browsers from zooming into a focused field. */
+  font-size: max(16px, 1em);
+}
+.kiosk-shell button { touch-action: manipulation; }
+.kiosk-shell > .app-container { flex: 1; min-height: 0; height: auto; }
+.kiosk-main-content { flex: 1; min-height: 0; display: flex; }
+
 .kiosk-install-status { order: 1; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; gap: 16px; padding: 10px 24px; padding-left: max(24px, env(safe-area-inset-left)); padding-right: max(24px, env(safe-area-inset-right)); background: var(--bg-tertiary); color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
 .kiosk-install-status > .btn { flex-shrink: 0; min-height: 44px; }
 @media (max-width: 600px) { .kiosk-install-status { padding: 12px 16px; flex-wrap: wrap; } }
+
+.kiosk-terminal {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+/* ---------- Buttons ---------- */
+.kiosk-primary,
+.kiosk-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: var(--k-tap);
+  padding: 0 28px;
+  border-radius: 14px;
+  font-family: var(--font-logo);
+  font-weight: 700;
+  font-size: clamp(16px, 1.2vmin + 10px, 20px);
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: transform 90ms ease, background-color 120ms ease, opacity 120ms ease;
+}
+.kiosk-primary { border: 0; background: var(--text-primary); color: var(--bg-primary); }
+.kiosk-secondary { border: 1px solid var(--border-color); background: transparent; color: var(--text-secondary); }
+.kiosk-primary:active:not(:disabled),
+.kiosk-secondary:active:not(:disabled) { transform: scale(0.97); }
+.kiosk-primary:disabled { background: var(--bg-tertiary); color: var(--text-muted); cursor: not-allowed; }
+.kiosk-secondary:disabled { opacity: 0.5; }
+
+/* ---------- Welcome ---------- */
+.kiosk-welcome {
+  grid-row: 1 / -1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(20px, 4vmin, 44px);
+  padding: clamp(24px, 6vmin, 72px);
+  text-align: center;
+  background: radial-gradient(120% 70% at 50% 0%, #19160f 0%, var(--bg-primary) 62%);
+}
+.kiosk-logo {
+  font-family: var(--font-logo);
+  font-weight: 700;
+  letter-spacing: -0.045em;
+  line-height: 0.9;
+  /* vmin + vmax keeps the same visual weight in portrait and landscape. */
+  font-size: clamp(72px, 9vmin + 5vmax, 196px);
+  color: var(--text-primary);
+  touch-action: manipulation;
+}
+.kiosk-logo > span { color: var(--accent-warm); }
+.kiosk-welcome-kicker { margin-top: 14px; padding-left: 0.42em; letter-spacing: 0.42em; font-size: clamp(13px, 0.8vmin + 0.8vmax, 20px); color: var(--text-secondary); }
+.kiosk-welcome-copy { font-size: clamp(22px, 2vmin + 1.6vmax, 42px); line-height: 1.3; font-weight: 300; }
+.kiosk-welcome-start { min-height: clamp(68px, 4vmin + 3vmax, 100px); min-width: min(100%, 420px); padding: 0 44px; border-radius: 999px; font-size: clamp(18px, 1.2vmin + 1vmax, 26px); letter-spacing: 0.08em; }
+.kiosk-welcome-foot { color: var(--text-muted); font-size: 14px; letter-spacing: 0.06em; }
+
+/* ---------- Header ---------- */
+.kiosk-header {
+  display: flex;
+  align-items: center;
+  gap: var(--k-gap);
+  min-height: 64px;
+  padding: 8px var(--k-gap);
+  border-bottom: 1px solid var(--border-color);
+  min-width: 0;
+}
+.kiosk-header-brand { display: flex; align-items: center; gap: 14px; min-height: 48px; flex-shrink: 0; }
+.kiosk-logo-small { font-size: 30px; line-height: 1; }
+.kiosk-header-label { color: var(--text-muted); font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; }
+.kiosk-header .connection-control { position: relative; top: auto; right: auto; margin-inline-start: auto; z-index: 150; }
+.kiosk-header .connection-status { min-height: 44px; }
+.kiosk-toast { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1; margin: 0; padding: 8px 14px; border-radius: 10px; background: #393223; color: #f4dfae; font-size: 14px; }
+.kiosk-toast button { min-height: 44px; min-width: 44px; background: transparent; border: 0; color: inherit; text-decoration: underline; font-size: 14px; }
+.kiosk-toast button:first-of-type { margin-inline-start: auto; }
+
+/* ---------- Order button (header) ---------- */
+.kiosk-order-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  min-height: 52px;
+  padding: 0 18px 0 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-family: var(--font-logo);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: background-color 120ms ease, transform 90ms ease;
+}
+.kiosk-order-button:active { transform: scale(0.97); }
+.kiosk-order-button[aria-expanded="true"] { background: var(--bg-tertiary); }
+.kiosk-order-count {
+  display: grid;
+  place-items: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--accent-warm);
+  color: #1a1710;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  /* Re-mounted on every change (key), so each add gives a short pulse. */
+  animation: kiosk-pulse 260ms var(--k-ease);
+}
+@keyframes kiosk-pulse { 0% { transform: scale(0.6); } 70% { transform: scale(1.15); } 100% { transform: scale(1); } }
+.kiosk-added {
+  position: fixed;
+  z-index: 170;
+  left: 50%;
+  bottom: max(24px, env(safe-area-inset-bottom));
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100vw - 32px);
+  margin: 0;
+  padding: 12px 20px;
+  border-radius: 999px;
+  background: var(--text-primary);
+  color: var(--bg-primary);
+  font-weight: 600;
+  font-size: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transform: translateX(-50%);
+  animation: kiosk-rise 200ms var(--k-ease);
+  pointer-events: none;
+}
+@keyframes kiosk-rise { from { opacity: 0; transform: translate(-50%, 12px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+/* ---------- Catalog: the whole area below the header ---------- */
+.kiosk-catalog { display: flex; min-width: 0; min-height: 0; }
+.kiosk-catalog .catalog-container { flex: 1; min-height: 0; height: auto; border: 0; }
+.kiosk-catalog .catalog-header { padding: var(--k-gap) var(--k-gap) 12px; gap: 14px; }
+.kiosk-catalog .catalog-heading { flex-direction: row; align-items: baseline; }
+.kiosk-catalog .catalog-title { font-size: clamp(22px, 1.6vmin + 14px, 30px); }
+.kiosk-catalog .categories-tabs { gap: 10px; margin-inline: calc(var(--k-gap) * -1); padding: 2px var(--k-gap) 4px; overscroll-behavior-x: contain; }
+.kiosk-catalog .category-tab { flex-shrink: 0; min-height: 52px; padding: 0 22px; font-size: 16px; font-weight: 600; transition: background-color 120ms ease, color 120ms ease; }
+/* Landscape: 4 columns at 1280 CSS px, 3 at ~1000. Portrait: always 2 (3 on very wide portrait). */
+.kiosk-catalog .products-grid {
+  align-content: start;
+  grid-template-columns: repeat(auto-fill, minmax(min(236px, 100%), 1fr));
+  /* max-content: overflow:hidden cards have a 0 automatic minimum, so `auto` rows would shrink to fit. */
+  grid-auto-rows: max-content;
+  gap: var(--k-gap);
+  padding: 4px var(--k-gap) calc(var(--k-gap) + 8px);
+  overscroll-behavior: contain;
+}
+.kiosk-terminal[data-stacked="true"] .kiosk-catalog .products-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (min-width: 1000px) and (orientation: portrait) {
+  .kiosk-terminal[data-stacked="true"] .kiosk-catalog .products-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+.kiosk-catalog .product-card {
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  gap: 0;
+  border-radius: var(--k-radius);
+  transition: transform 90ms ease, border-color 120ms ease;
+}
+.kiosk-catalog .product-card::before { display: none; }
+.kiosk-catalog .product-card:hover { transform: none; box-shadow: none; border-color: var(--border-color); background: var(--bg-secondary); }
+.kiosk-catalog .product-card:active:not(:disabled) { transform: scale(0.98); border-color: var(--accent-warm); }
+.kiosk-catalog .product-card > * { flex-shrink: 0; }
+/* Square photo box with a stable size: the skeleton is the final size, no layout shift. */
+.kiosk-catalog .product-card-image-wrapper,
+.kiosk-catalog .product-card-icon-wrapper {
+  position: relative;
+  height: auto;
+  aspect-ratio: 1 / 1;
+  border: 0;
+  border-radius: var(--k-radius) var(--k-radius) 0 0;
+  background: linear-gradient(160deg, #221f1a 0%, #17160f 100%);
+  overflow: hidden;
+}
+/* Brand illustration for products whose photo is pending: centered mark on warm ground. */
+.kiosk-catalog .product-card-icon-wrapper { display: grid; place-items: center; justify-content: center; color: #cdbb93; background: radial-gradient(70% 70% at 50% 45%, #2d281f 0%, #1a1813 100%); }
+.kiosk-catalog .product-card-icon-wrapper .product-card-icon { width: clamp(72px, 34%, 140px); height: clamp(72px, 34%, 140px); aspect-ratio: 1; stroke-width: 1px; }
+/* Portrait: 5:4 photos keep two large columns while showing more of the menu. */
+.kiosk-terminal[data-stacked="true"] .kiosk-catalog .product-card-image-wrapper,
+.kiosk-terminal[data-stacked="true"] .kiosk-catalog .product-card-icon-wrapper { aspect-ratio: 5 / 4; }
+.kiosk-catalog .product-card-image { width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 160ms ease; }
+.kiosk-catalog .product-card-image-wrapper.is-loaded .product-card-image { opacity: 1; }
+.kiosk-catalog .product-card:hover .product-card-image { transform: none; }
+.kiosk-catalog .product-card-info { min-height: auto; padding: 14px 16px 0; gap: 4px; }
+.kiosk-catalog .product-card-name { font-size: clamp(17px, 0.6vmin + 13px, 20px); line-height: 1.2; white-space: normal; overflow-wrap: break-word; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.kiosk-catalog .product-card-desc { font-size: 14px; height: auto; -webkit-line-clamp: 2; }
+.kiosk-catalog .product-card-footer { margin-top: auto; padding: 12px 16px 16px; gap: 8px; flex-wrap: wrap; align-items: center; }
+.kiosk-catalog .product-card-price { font-size: clamp(17px, 0.6vmin + 13px, 20px); font-weight: 700; white-space: nowrap; }
+.kiosk-catalog .product-card-action { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 999px; background: var(--bg-tertiary); font-size: 14px; }
+.kiosk-catalog .product-card-depleted { opacity: 0.55; }
+.kiosk-catalog .depleted-badge { z-index: 1; }
+
+/* The POS breakpoints in workspace.css/responsive.css switch to page scrolling and
+   fixed minimum heights below 1000px; the kiosk always scrolls inside its regions. */
+.kiosk-catalog .catalog-container { flex-shrink: 1; overflow: hidden; }
+.kiosk-catalog .products-grid { min-height: 0; overflow-x: hidden; overflow-y: auto; }
+
+/* ---------- Order panel (overlay; never part of the layout) ---------- */
+.kiosk-drawer-layer { position: fixed; inset: 0; z-index: 180; display: flex; }
+.kiosk-drawer-backdrop { position: absolute; inset: 0; border: 0; background: rgba(6, 6, 8, 0.6); animation: kiosk-fade 180ms ease; cursor: default; }
+@keyframes kiosk-fade { from { opacity: 0; } to { opacity: 1; } }
+.kiosk-drawer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-secondary);
+  outline: none;
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.45);
+}
+/* Landscape: right drawer, 360–440 CSS px, full height, over the catalog. */
+.kiosk-drawer-layer[data-variant="drawer"] { justify-content: flex-end; }
+.kiosk-drawer-layer[data-variant="drawer"] .kiosk-drawer {
+  width: min(clamp(360px, 34vw, 440px), 100vw - 48px);
+  height: 100%;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) 0;
+  border-left: 1px solid var(--border-color);
+  animation: kiosk-slide-in 220ms var(--k-ease);
+}
+@keyframes kiosk-slide-in { from { transform: translateX(100%); } to { transform: none; } }
+/* Portrait: bottom sheet up to ~88% of the height; header and CTA always visible. */
+.kiosk-drawer-layer[data-variant="sheet"] { align-items: flex-end; }
+.kiosk-drawer-layer[data-variant="sheet"] .kiosk-drawer {
+  width: 100%;
+  max-height: min(88%, 100% - 56px - env(safe-area-inset-top));
+  padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  border-top: 1px solid var(--border-color);
+  border-radius: 24px 24px 0 0;
+  animation: kiosk-sheet-in 220ms var(--k-ease);
+}
+@keyframes kiosk-sheet-in { from { transform: translateY(100%); } to { transform: none; } }
+.kiosk-drawer-grip { align-self: center; flex-shrink: 0; width: 48px; height: 5px; margin: 10px 0 2px; border-radius: 3px; background: var(--border-color); }
+.kiosk-drawer .cart-sidebar { flex: 1; min-height: 0; height: auto; border: 0; background: transparent; }
+.kiosk-drawer .cart-header { flex-shrink: 0; gap: 8px; padding: var(--k-gap) var(--k-gap) 12px; }
+.kiosk-drawer-layer[data-variant="sheet"] .cart-header { padding-top: 8px; }
+.kiosk-drawer .cart-title { font-size: 20px; margin-inline-end: auto; }
+.kiosk-drawer .clear-order-btn { min-height: 44px; padding: 0 14px; }
+.kiosk-drawer .cart-close-btn { display: grid; place-items: center; flex-shrink: 0; width: 48px; height: 48px; border: 1px solid var(--border-color); border-radius: 50%; background: transparent; color: var(--text-primary); cursor: pointer; }
+.kiosk-drawer .cart-items-wrapper { flex: 1 1 auto; min-height: 0; max-height: none; padding: 8px var(--k-gap); gap: 14px; overflow-y: auto; overscroll-behavior: contain; }
+.kiosk-drawer .cart-item-name { font-size: 17px; }
+.kiosk-drawer .cart-item-customization { font-size: 14px; }
+.kiosk-drawer .cart-qty-btn { width: 48px; height: 48px; font-size: 22px; }
+.kiosk-drawer .cart-qty-value { min-width: 32px; text-align: center; font-size: 18px; }
+.kiosk-drawer .cart-remove-btn { min-height: 44px; padding: 0 12px; }
+.kiosk-drawer .cart-footer { flex-shrink: 0; display: block; padding: 16px var(--k-gap) var(--k-gap); }
+.kiosk-drawer .cart-summary-row { margin: 0 0 14px; }
+.kiosk-drawer .summary-value { font-size: 22px; }
+.kiosk-drawer .checkout-btn { width: 100%; min-width: 0; min-height: 64px; border-radius: 14px; font-size: 18px; }
+.kiosk-drawer .empty-cart { flex-direction: column; justify-content: center; padding: 32px 24px; }
+
+@media (max-width: 560px) {
+  .kiosk-header-label { display: none; }
+  .kiosk-order-button { padding: 0 14px; }
+}
+@media (max-width: 420px) {
+  .kiosk-order-label { display: none; }
+}
+
+/* ---------- Product customization ---------- */
+.kiosk-shell .modal-photo { margin: -20px calc(-1 * var(--k-gap)) 0; aspect-ratio: 16 / 9; max-height: 34vh; flex-shrink: 0; overflow: hidden; background: #1c1a15; }
+.kiosk-shell .modal-photo img { width: 100%; height: 100%; object-fit: cover; }
+.kiosk-shell .modal-backdrop { position: fixed; inset: 0; z-index: 200; backdrop-filter: none; -webkit-backdrop-filter: none; background: rgba(0, 0, 0, 0.62); }
+.kiosk-shell .modal-sheet { width: clamp(380px, 44%, 560px); height: 100%; max-height: 100%; padding-top: env(safe-area-inset-top); padding-right: env(safe-area-inset-right); padding-bottom: env(safe-area-inset-bottom); box-shadow: none; }
+.kiosk-shell .modal-header { padding: 28px var(--k-gap) 16px; }
+.kiosk-shell .modal-close-btn { min-width: 48px; min-height: 48px; }
+.kiosk-shell .modal-title { font-size: clamp(22px, 1.6vmin + 14px, 30px); }
+.kiosk-shell .modal-body { min-height: 0; padding: 20px var(--k-gap); gap: 22px; overscroll-behavior: contain; }
+.kiosk-shell .option-btn { min-height: 56px; font-size: 16px; }
+.kiosk-shell .option-sub { font-size: 13px; }
+.kiosk-shell .qty-btn { min-width: 52px; min-height: 52px; }
+.kiosk-shell .modal-footer { flex-shrink: 0; padding: 16px var(--k-gap) var(--k-gap); }
+.kiosk-shell .add-to-cart-btn { height: auto; min-height: 64px; border-radius: 14px; font-size: 18px; }
+.kiosk-terminal[data-stacked="true"] .modal-backdrop { align-items: flex-end; justify-content: stretch; }
+.kiosk-terminal[data-stacked="true"] .modal-sheet { width: 100%; height: auto; max-height: calc(100% - 40px - env(safe-area-inset-top)); padding-left: env(safe-area-inset-left); border-left: 0; border-top: 1px solid var(--border-color); border-radius: 24px 24px 0 0; }
+
+/* ---------- Checkout ---------- */
+.kiosk-shell .checkout-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.kiosk-shell .checkout-dialog { width: min(600px, 100%); max-width: 100%; max-height: 100%; overflow-y: auto; overscroll-behavior: contain; padding: clamp(24px, 4vmin, 44px) clamp(20px, 4vmin, 44px); box-shadow: none; }
+.kiosk-shell .checkout-close-x { min-width: 48px; min-height: 48px; }
+.kiosk-shell .payment-heading { padding-inline-end: 52px; }
+.kiosk-shell .name-input { min-height: 60px; font-size: 22px; }
+.kiosk-shell .confirm-name-btn,
+.kiosk-shell .done-btn,
+.kiosk-shell .payment-method-btn { min-height: 64px; }
+.kiosk-shell .payment-methods-grid { grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); }
+.kiosk-shell .checkout-secondary-action { min-height: 52px; }
+.kiosk-auto-reset { margin-top: 12px; color: var(--text-muted); font-size: 14px; text-align: center; font-variant-numeric: tabular-nums; }
+
+/* ---------- Overlays: offline, "¿Sigues ahí?", cancel confirmation ---------- */
+.kiosk-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: grid;
+  place-items: center;
+  padding: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
+  background: rgba(10, 10, 12, 0.82);
+}
+.kiosk-offline { background: var(--bg-primary); z-index: 390; }
+.kiosk-overlay-card { display: flex; flex-direction: column; align-items: center; gap: 16px; width: min(520px, 100%); max-height: 100%; overflow-y: auto; padding: clamp(28px, 5vmin, 48px); border: 1px solid var(--border-color); border-radius: 24px; background: var(--bg-secondary); text-align: center; outline: none; }
+.kiosk-overlay-card h2 { font-family: var(--font-logo); font-size: clamp(26px, 2vmin + 18px, 36px); letter-spacing: -0.02em; }
+.kiosk-overlay-card p { color: var(--text-secondary); font-size: 17px; line-height: 1.5; }
+.kiosk-dialog-countdown { color: var(--accent-warm) !important; font-size: 30px !important; font-weight: 700; font-variant-numeric: tabular-nums; }
+.kiosk-dialog-actions { display: grid; gap: 12px; width: 100%; margin-top: 8px; }
+.kiosk-offline-mark { width: 14px; height: 14px; border-radius: 50%; background: var(--status-pending); box-shadow: 0 0 0 10px rgba(255, 214, 10, 0.1); }
+.kiosk-progress { display: flex; align-items: center; gap: 10px; color: var(--text-secondary); font-size: 15px; }

@@ -57,7 +57,7 @@ export interface DbCashRegister {
 
 export interface DbCashTransaction {
   id?: number;
-  type: 'payment' | 'change' | 'manual_income' | 'manual_expense' | 'adjustment' | 'manual_investment' | 'card_payment' | 'refund';
+  type: 'payment' | 'change' | 'manual_income' | 'manual_expense' | 'adjustment' | 'manual_investment' | 'card_payment' | 'refund' | 'voucher_payout';
   amount: number;
   description: string;
   denominations: Record<string, number>;
@@ -240,6 +240,8 @@ export interface DbOrder {
   discountType?: string;
   discountReason?: string;
   discountAuthorizedBy?: string;
+  /** Part of `total` paid with change vouchers (a liability settlement, not a discount). */
+  voucherAmount?: number;
   tax?: number;
   total: number;
   status: string;
@@ -252,6 +254,51 @@ export interface DbOrder {
   inventoryAppliedAt?: string;
   createdAt: string;
   updatedAt?: string;
+}
+
+export interface DbChangeVoucher {
+  id: string;
+  code: string;
+  orderId?: string;
+  amount: number;
+  balance: number;
+  status: 'ACTIVE' | 'REDEEMED' | 'CANCELLED';
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+  cancelledReason?: string;
+  cancelledBy?: string;
+  cancelledAt?: string;
+}
+
+export interface DbChangeVoucherRedemption {
+  id: string;
+  voucherId: string;
+  kind: 'CASH' | 'ORDER';
+  amount: number;
+  orderId?: string;
+  operationId: string;
+  status: 'APPLIED' | 'RELEASED';
+  denominations: Record<string, number>;
+  userId?: string;
+  createdAt: string;
+}
+
+/** What the customer still has to pay after vouchers. */
+export function amountDue(order: Pick<DbOrder, 'total' | 'voucherAmount'>): number {
+  return Math.round((order.total - (order.voucherAmount ?? 0)) * 100) / 100;
+}
+
+export interface CashPaymentInput {
+  orderId: string;
+  paymentId: string;
+  consumption: DbInventoryConsumption[];
+  receivedAmount: number;
+  changeAmount: number;
+  receivedDenominations: Record<string, number>;
+  changeDenominations: Record<string, number>;
+  /** Change the drawer could not give, issued as a voucher in the same transaction. */
+  voucher?: { code: string; amount: number; userId: string };
 }
 
 // Adaptor interface
@@ -269,7 +316,23 @@ export interface DbAdapter {
   reserveOrderInventory(orderId: string, consumption: DbInventoryConsumption[]): Promise<void>;
   updateOrderStatus(orderId: string, status: string, paymentId?: string, paymentStatus?: string, cancellationReason?: string): Promise<void>;
   confirmOrderPayment(orderId: string, paymentId: string, consumption: DbInventoryConsumption[]): Promise<boolean>;
-  confirmCashOrderPayment(input: { orderId: string; paymentId: string; consumption: DbInventoryConsumption[]; receivedAmount: number; changeAmount: number; receivedDenominations: Record<string, number>; changeDenominations: Record<string, number> }): Promise<boolean>;
+  confirmCashOrderPayment(input: CashPaymentInput): Promise<boolean>;
+  /** False until migration 007 is applied (Supabase); always true for the JSON adapter. */
+  vouchersAvailable(): Promise<boolean>;
+  getChangeVoucher(code: string): Promise<DbChangeVoucher | undefined>;
+  getChangeVoucherForOrder(orderId: string): Promise<DbChangeVoucher | undefined>;
+  /** Pays the whole balance in cash. Returns the amount paid, 0 for a replay of the same operation. */
+  redeemChangeVoucherCash(input: { code: string; operationId: string; amount: number; denominations: Record<string, number>; userId: string }): Promise<number>;
+  /** Reserves part of the balance as a discount on an order. False for a replay. */
+  applyChangeVoucherToOrder(input: { code: string; orderId: string; operationId: string; amount: number }): Promise<boolean>;
+  /** Gives back what a cancelled order took from a voucher. Idempotent; returns the amount released. */
+  releaseChangeVoucherForOrder(orderId: string): Promise<number>;
+  /** Using vouchers on orders needs migration 008 (orders.voucher_amount). */
+  voucherOrdersAvailable(): Promise<boolean>;
+  /** Releases reservations older than 10 minutes whose order was never stored. */
+  releaseOrphanVoucherRedemptions(code: string): Promise<number>;
+  cancelChangeVoucher(input: { code: string; reason: string; userId: string }): Promise<boolean>;
+  listChangeVouchers(): Promise<Array<DbChangeVoucher & { redemptions: DbChangeVoucherRedemption[] }>>;
   applyOrderRefund(input: { orderId: string; operationId: string; reason: string; userId: string; cashDenominations?: Record<string, number> }): Promise<boolean>;
   getInventory(): Promise<DbInventoryItem[]>;
   updateInventory(productId: string, stock: number, cost: number): Promise<void>;
@@ -329,6 +392,8 @@ export class JsonDbAdapter implements DbAdapter {
   private data: {
     pickupSettings?: DbPickupSettings;
     inventoryReservations?: Array<{ orderId: string; consumption: DbInventoryConsumption[] }>;
+    changeVouchers?: DbChangeVoucher[];
+    changeVoucherRedemptions?: DbChangeVoucherRedemption[];
     orders: DbOrder[];
     inventory: DbInventoryItem[];
     cashRegister: Record<string, number>;
@@ -573,11 +638,119 @@ export class JsonDbAdapter implements DbAdapter {
     return true;
   }
 
-  async confirmCashOrderPayment(input: { orderId: string; paymentId: string; consumption: DbInventoryConsumption[]; receivedAmount: number; changeAmount: number; receivedDenominations: Record<string, number>; changeDenominations: Record<string, number> }): Promise<boolean> {
+  async confirmCashOrderPayment(input: CashPaymentInput): Promise<boolean> {
     return this.serializeMutation(() => this.confirmCashOrderPaymentUnsafe(input));
   }
 
-  private async confirmCashOrderPaymentUnsafe(input: { orderId: string; paymentId: string; consumption: DbInventoryConsumption[]; receivedAmount: number; changeAmount: number; receivedDenominations: Record<string, number>; changeDenominations: Record<string, number> }): Promise<boolean> {
+  async vouchersAvailable(): Promise<boolean> { return true; }
+
+  async getChangeVoucher(code: string): Promise<DbChangeVoucher | undefined> {
+    await this.read();
+    const voucher = (this.data.changeVouchers ?? []).find((entry) => entry.code === code);
+    return voucher ? { ...voucher } : undefined;
+  }
+
+  async getChangeVoucherForOrder(orderId: string): Promise<DbChangeVoucher | undefined> {
+    await this.read();
+    const voucher = (this.data.changeVouchers ?? []).find((entry) => entry.orderId === orderId);
+    return voucher ? { ...voucher } : undefined;
+  }
+
+  async redeemChangeVoucherCash(input: { code: string; operationId: string; amount: number; denominations: Record<string, number>; userId: string }): Promise<number> {
+    await this.read();
+    const redemptions = this.data.changeVoucherRedemptions ??= [];
+    if (redemptions.some((entry) => entry.operationId === input.operationId)) return 0;
+    if (!this.data.cashSessions.some((session) => !session.closedAt)) throw new Error('cash_session_required');
+    const voucher = (this.data.changeVouchers ?? []).find((entry) => entry.code === input.code);
+    if (!voucher) throw new Error('voucher_not_found');
+    if (voucher.status !== 'ACTIVE' || voucher.balance <= 0) throw new Error('voucher_not_active');
+    if (Math.abs(voucher.balance - input.amount) > 0.001) throw new Error('voucher_amount_mismatch');
+    for (const [denomination, count] of Object.entries(input.denominations)) {
+      if ((this.data.cashRegister[denomination] || 0) < count) throw new Error(`insufficient_cash_denomination:${denomination}`);
+    }
+    for (const [denomination, count] of Object.entries(input.denominations)) this.data.cashRegister[denomination] -= count;
+    const now = new Date().toISOString();
+    this.data.transactions.push({ id: this.data.transactions.length + 1, type: 'voucher_payout', amount: input.amount, description: `Pago en efectivo del cupón de cambio ${input.code}`, denominations: input.denominations, created_at: now });
+    redemptions.push({ id: randomUUID(), voucherId: voucher.id, kind: 'CASH', amount: input.amount, operationId: input.operationId, status: 'APPLIED', denominations: input.denominations, userId: input.userId, createdAt: now });
+    Object.assign(voucher, { balance: 0, status: 'REDEEMED', updatedAt: now });
+    await this.save();
+    return input.amount;
+  }
+
+  async applyChangeVoucherToOrder(input: { code: string; orderId: string; operationId: string; amount: number }): Promise<boolean> {
+    await this.read();
+    const redemptions = this.data.changeVoucherRedemptions ??= [];
+    if (redemptions.some((entry) => entry.operationId === input.operationId)) return false;
+    const voucher = (this.data.changeVouchers ?? []).find((entry) => entry.code === input.code);
+    if (!voucher) throw new Error('voucher_not_found');
+    if (voucher.status !== 'ACTIVE' || voucher.balance + 0.001 < input.amount || input.amount <= 0) throw new Error('voucher_not_active');
+    const now = new Date().toISOString();
+    redemptions.push({ id: randomUUID(), voucherId: voucher.id, kind: 'ORDER', amount: input.amount, orderId: input.orderId, operationId: input.operationId, status: 'APPLIED', denominations: {}, createdAt: now });
+    const balance = Math.round((voucher.balance - input.amount) * 100) / 100;
+    Object.assign(voucher, { balance, status: balance <= 0 ? 'REDEEMED' : 'ACTIVE', updatedAt: now });
+    await this.save();
+    return true;
+  }
+
+  async voucherOrdersAvailable(): Promise<boolean> { return true; }
+
+  async releaseOrphanVoucherRedemptions(code: string): Promise<number> {
+    await this.read();
+    const voucher = (this.data.changeVouchers ?? []).find((entry) => entry.code === code);
+    if (!voucher) return 0;
+    const cutoff = Date.now() - 10 * 60_000;
+    let released = 0;
+    for (const redemption of this.data.changeVoucherRedemptions ?? []) {
+      if (redemption.voucherId !== voucher.id || redemption.kind !== 'ORDER' || redemption.status !== 'APPLIED') continue;
+      if (Date.parse(redemption.createdAt) >= cutoff || this.data.orders.some((order) => order.id === redemption.orderId)) continue;
+      redemption.status = 'RELEASED';
+      voucher.balance = Math.round((voucher.balance + redemption.amount) * 100) / 100;
+      if (voucher.status === 'REDEEMED') voucher.status = 'ACTIVE';
+      released += redemption.amount;
+    }
+    if (released > 0) { voucher.updatedAt = new Date().toISOString(); await this.save(); }
+    return released;
+  }
+
+  async cancelChangeVoucher(input: { code: string; reason: string; userId: string }): Promise<boolean> {
+    await this.read();
+    if (input.reason.trim().length < 5) throw new Error('voucher_cancel_reason_required');
+    const voucher = (this.data.changeVouchers ?? []).find((entry) => entry.code === input.code);
+    if (!voucher) throw new Error('voucher_not_found');
+    if (voucher.status === 'CANCELLED') return false;
+    const reserved = (this.data.changeVoucherRedemptions ?? []).some((entry) => entry.voucherId === voucher.id && entry.kind === 'ORDER' && entry.status === 'APPLIED' && this.data.orders.some((order) => order.id === entry.orderId && order.status === 'PENDING_PAYMENT'));
+    if (reserved) throw new Error('voucher_reserved_by_pending_order');
+    if (voucher.status !== 'ACTIVE') throw new Error('voucher_not_active');
+    const now = new Date().toISOString();
+    Object.assign(voucher, { status: 'CANCELLED', cancelledReason: input.reason.trim(), cancelledBy: input.userId, cancelledAt: now, updatedAt: now });
+    await this.save();
+    return true;
+  }
+
+  async listChangeVouchers(): Promise<Array<DbChangeVoucher & { redemptions: DbChangeVoucherRedemption[] }>> {
+    await this.read();
+    const redemptions = this.data.changeVoucherRedemptions ?? [];
+    return (this.data.changeVouchers ?? []).map((voucher) => ({ ...voucher, redemptions: redemptions.filter((entry) => entry.voucherId === voucher.id).map((entry) => ({ ...entry })) })).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async releaseChangeVoucherForOrder(orderId: string): Promise<number> {
+    await this.read();
+    let released = 0;
+    const now = new Date().toISOString();
+    for (const redemption of this.data.changeVoucherRedemptions ?? []) {
+      if (redemption.orderId !== orderId || redemption.kind !== 'ORDER' || redemption.status !== 'APPLIED') continue;
+      const voucher = (this.data.changeVouchers ?? []).find((entry) => entry.id === redemption.voucherId);
+      if (!voucher) continue;
+      redemption.status = 'RELEASED';
+      // Never resurrect a voucher an administrator cancelled.
+      Object.assign(voucher, { balance: Math.round((voucher.balance + redemption.amount) * 100) / 100, status: voucher.status === 'CANCELLED' ? 'CANCELLED' : 'ACTIVE', updatedAt: now });
+      released += redemption.amount;
+    }
+    if (released > 0) await this.save();
+    return released;
+  }
+
+  private async confirmCashOrderPaymentUnsafe(input: CashPaymentInput): Promise<boolean> {
     await this.read();
     if (!this.data.cashSessions.some((session) => !session.closedAt)) throw new Error('Cash session required');
     const order = this.data.orders.find((entry) => entry.id === input.orderId);
@@ -604,6 +777,10 @@ export class JsonDbAdapter implements DbAdapter {
     for (const [denomination, count] of Object.entries(input.changeDenominations)) {
       if ((this.data.cashRegister[denomination] || 0) < count) throw new Error(`Insufficient cash denomination: ${denomination}`);
       this.data.cashRegister[denomination] -= count;
+    }
+    if (input.voucher) {
+      if (input.voucher.amount <= 0) throw new Error('voucher_amount_required');
+      (this.data.changeVouchers ??= []).push({ id: randomUUID(), code: input.voucher.code, orderId: input.orderId, amount: input.voucher.amount, balance: input.voucher.amount, status: 'ACTIVE', createdBy: input.voucher.userId, createdAt: now, updatedAt: now });
     }
     await this.save();
     return true;
@@ -632,7 +809,7 @@ export class JsonDbAdapter implements DbAdapter {
           this.data.cashRegister[denomination] -= count;
         }
       }
-      this.data.transactions.push({ id: this.data.transactions.length + 1, type: 'refund', amount: order.total, description: `Devolución de orden ${order.folio || order.id}: ${input.reason}`, denominations: input.cashDenominations || {}, created_at: now });
+      this.data.transactions.push({ id: this.data.transactions.length + 1, type: 'refund', amount: order.paymentMethod === 'cash' ? amountDue(order) : 0, description: `Devolución de orden ${order.folio || order.id}: ${input.reason}`, denominations: input.cashDenominations || {}, created_at: now });
       Object.assign(order, { status: 'REFUNDED', paymentStatus: 'REFUNDED', updatedAt: now });
       await this.save();
       return true;

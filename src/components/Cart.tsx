@@ -7,6 +7,9 @@ interface CartProps {
   onUpdateQty: (id: string, qty: number) => void;
   onCheckout: () => void;
   onCancelOrder: () => void;
+  /** When rendered as a panel (kiosk), shows a close button in the header. */
+  onClose?: () => void;
+  titleId?: string;
 }
 
 export const Cart: React.FC<CartProps> = ({
@@ -15,6 +18,8 @@ export const Cart: React.FC<CartProps> = ({
   onUpdateQty,
   onCheckout,
   onCancelOrder,
+  onClose,
+  titleId,
 }) => {
   const subtotal = cart.reduce((acc, item) => acc + item.totalPrice, 0);
 
@@ -65,10 +70,15 @@ export const Cart: React.FC<CartProps> = ({
   return (
     <div className="cart-sidebar">
       <div className="cart-header">
-        <h3 className="cart-title">TU PEDIDO</h3>
+        <h3 className="cart-title" id={titleId}>TU PEDIDO</h3>
         {cart.length > 0 && (
           <button className="clear-order-btn" onClick={onCancelOrder}>
             Cancelar
+          </button>
+        )}
+        {onClose && (
+          <button type="button" className="cart-close-btn" onClick={onClose} aria-label="Cerrar pedido">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
           </button>
         )}
       </div>

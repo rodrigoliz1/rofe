@@ -53,7 +53,7 @@ try {
     const scope = new URL(manifest.scope ?? '/', manifestUrl);
     if (start.origin !== origin || scope.origin !== origin || !start.pathname.startsWith(scope.pathname)) issue('start_url está fuera del scope/origen.');
     if (start.pathname !== '/kiosk') issue('La aplicación instalada no arranca en /kiosk.');
-    if (manifest.orientation !== 'landscape') issue('La instalación no declara orientación landscape.');
+    if (manifest.orientation !== 'any') issue('La instalación debe permitir vertical y horizontal (orientation: any).');
     if (/localhost|127\.0\.0\.1|192\.168\.|:5173|:4173/.test(JSON.stringify(manifest))) issue('El manifest contiene direcciones de desarrollo.');
     await resource(start.href, 'start_url');
     for (const icon of manifest.icons ?? []) {

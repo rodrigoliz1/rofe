@@ -6,7 +6,7 @@
   "start_url": "/kiosk",
   "scope": "/",
   "display": "standalone",
-  "orientation": "landscape",
+  "orientation": "any",
   "background_color": "#111311",
   "theme_color": "#111311",
   "prefer_related_applications": false,

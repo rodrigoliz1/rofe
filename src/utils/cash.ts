@@ -25,3 +25,39 @@ export function calculateOptimalChange(changeDue: number, availableCoins: Record
   const result = search(0, target);
   return result ? { success: true, changeBreakdown: result } : { success: false, changeBreakdown: {}, error: 'No hay una combinación exacta de cambio. Solicita otras denominaciones.' };
 }
+
+/**
+ * Largest change that can actually be given with the drawer's denominations, never more
+ * than `changeDue`. Used when exact change is impossible: the rest becomes a change voucher.
+ * Bounded knapsack over cents, O(denominations × amount).
+ */
+export function calculateBestPossibleChange(changeDue: number, availableCoins: Record<string, number>): { amount: number; changeBreakdown: Record<string, number> } {
+  const target = Math.round(Math.max(0, changeDue) * 100);
+  if (target === 0) return { amount: 0, changeBreakdown: {} };
+  const coins = Object.entries(DENOM_VALUES).map(([key, value]) => ({ key, value: Math.round(value * 100), count: Math.max(0, Math.trunc(availableCoins[key] || 0)) })).filter((coin) => coin.count > 0);
+  // reach[s] = index of the coin used last to reach s (-1 = start, -2 = unreachable)
+  const reach = new Int16Array(target + 1).fill(-2);
+  const used = new Int32Array(target + 1);
+  reach[0] = -1;
+  coins.forEach((coin, coinIndex) => {
+    used.fill(0);
+    for (let sum = coin.value; sum <= target; sum += 1) {
+      if (reach[sum] === -2 && reach[sum - coin.value] !== -2 && used[sum - coin.value] < coin.count) {
+        reach[sum] = coinIndex;
+        used[sum] = used[sum - coin.value] + 1;
+      }
+    }
+  });
+  let best = target;
+  while (best > 0 && reach[best] === -2) best -= 1;
+  const changeBreakdown: Record<string, number> = {};
+  for (let sum = best; sum > 0;) {
+    const coin = coins[reach[sum]];
+    changeBreakdown[coin.key] = (changeBreakdown[coin.key] ?? 0) + 1;
+    sum -= coin.value;
+  }
+  return { amount: best / 100, changeBreakdown };
+}
+
+/** What is still to be collected after change vouchers (the order total stays the full price). */
+export const orderAmountDue = (order: { total: number; voucherAmount?: number }) => Math.round((order.total - (order.voucherAmount ?? 0)) * 100) / 100;

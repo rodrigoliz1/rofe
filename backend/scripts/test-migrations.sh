@@ -16,4 +16,5 @@ for migration in "$root_dir"/migrations/*.sql; do
   psql -X -v ON_ERROR_STOP=1 -h "$test_root" -d rofe_migration_test -f "$migration" >"$test_root/migrations.log" 2>&1 || { cat "$test_root/migrations.log"; exit 1; }
 done
 psql -X -v ON_ERROR_STOP=1 -h "$test_root" -d rofe_migration_test -f "$root_dir/tests/sql/critical-flows.sql"
+bash "$root_dir/tests/sql/concurrency.sh" "$test_root" rofe_migration_test
 echo 'PostgreSQL migrations and transactional payment checks passed.'

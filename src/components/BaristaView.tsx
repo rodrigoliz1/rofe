@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import type { CartItem, Order, OrderStatus } from '../types';
 import { useAsyncAction } from '../hooks/useAsyncAction';
-import { calculateOptimalChange, DENOM_VALUES } from '../utils/cash';
-import { apiFetch, publicError } from '../services/api';
+import { CashPaymentPanel } from './CashPaymentPanel';
+import { orderAmountDue } from '../utils/cash';
+import { VoucherPanel } from './VoucherPanel';
+import { apiFetch } from '../services/api';
 
 interface BaristaViewProps {
   orders: Order[];
@@ -11,21 +13,6 @@ interface BaristaViewProps {
   onClose: () => void;
 }
 
-const DENOM_LABELS: Record<string, string> = {
-  bill_1000: 'Billetes de $1000',
-  bill_500: 'Billetes de $500',
-  bill_200: 'Billetes de $200',
-  bill_100: 'Billetes de $100',
-  bill_50: 'Billetes de $50',
-  bill_20: 'Billetes de $20',
-  coin_20: 'Monedas de $20',
-  coin_10: 'Monedas de $10',
-  coin_5: 'Monedas de $5',
-  coin_2: 'Monedas de $2',
-  coin_1: 'Monedas de $1',
-  coin_0_50: 'Monedas de 50¢',
-  coin_0_20: 'Monedas de 20¢',
-};
 
 const playNewOrderSound = () => {
   try {
@@ -56,11 +43,10 @@ function OrderCustomer({ order }: { order: Order }) {
 
 export const BaristaView: React.FC<BaristaViewProps> = ({ orders, onUpdateOrderStatus, onClearOrders, onClose }) => {
   const actions = useAsyncAction();
-  const [activeTab, setActiveTab] = useState<'queue' | 'history'>('queue');
+  const [activeTab, setActiveTab] = useState<'queue' | 'history' | 'vouchers'>('queue');
   const [elapsedTimes, setElapsedTimes] = useState<Record<string, string>>({});
   const [orderAges, setOrderAges] = useState<Record<string, { className: string; label: string }>>({});
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
-  const [receivedDenoms, setReceivedDenoms] = useState<Record<string, number>>({});
   const [cashInventory, setCashInventory] = useState<Record<string, number>>({});
   const [cashError, setCashError] = useState('');
   const [undoReady, setUndoReady] = useState<{ orderId: string; folio: string } | null>(null);
@@ -81,10 +67,10 @@ export const BaristaView: React.FC<BaristaViewProps> = ({ orders, onUpdateOrderS
   }, [activeOrdersCount]);
 
   useEffect(() => {
-    if (selectedOrder && selectedOrder.status === 'PENDING_PAYMENT' && selectedOrder.paymentMethod === 'cash') {
-      loadCashInventory();
+    if ((selectedOrder && selectedOrder.status === 'PENDING_PAYMENT' && selectedOrder.paymentMethod === 'cash') || activeTab === 'vouchers') {
+      void loadCashInventory();
     }
-  }, [selectedOrder]);
+  }, [selectedOrder, activeTab]);
 
   useEffect(() => {
     const updateTimes = () => {
@@ -146,42 +132,6 @@ export const BaristaView: React.FC<BaristaViewProps> = ({ orders, onUpdateOrderS
     return orderAges[order.id] || { className: '', label: 'Reciente' };
   };
 
-  const handleCashPayment = async (order: Order) => {
-    const total = order.total;
-    const received = Object.entries(receivedDenoms).reduce((sum, [key, qty]) => sum + (DENOM_VALUES[key] || 0) * (qty || 0), 0);
-    const changeDue = received - total;
-
-    if (changeDue < 0) {
-      setCashError(`Faltan $${Math.abs(changeDue).toFixed(2)} MXN`);
-      return;
-    }
-
-    const changeResult = calculateOptimalChange(changeDue, Object.fromEntries(Object.keys(DENOM_VALUES).map((key) => [key, (cashInventory[key] || 0) + (receivedDenoms[key] || 0)])));
-    if (!changeResult.success) {
-      setCashError(changeResult.error || 'No hay suficiente cambio.');
-      return;
-    }
-
-    try {
-      const res = await apiFetch(`/api/orders/${encodeURIComponent(order.id)}/cash-payment`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          receivedDenominations: receivedDenoms,
-          changeDenominations: changeResult.changeBreakdown,
-          receivedAmount: received,
-          changeAmount: changeDue,
-        }),
-      });
-      if (!res.ok) throw new Error(await publicError(res));
-      setSelectedOrder(null);
-      setReceivedDenoms({});
-      setCashError('');
-    } catch (cause) {
-      setCashError(cause instanceof Error ? cause.message : 'Error al procesar pago.');
-    }
-  };
-
   const queueOrders = orders.filter((o) => ['PAID', 'IN_PREPARATION', 'READY'].includes(o.status));
   const cashOrders = orders.filter((o) => o.status === 'PENDING_PAYMENT' && o.paymentMethod === 'cash');
   const historyOrders = orders.filter((o) => o.status === 'COMPLETED' || o.status === 'REFUNDED' || o.status === 'CANCELLED');
@@ -203,12 +153,17 @@ export const BaristaView: React.FC<BaristaViewProps> = ({ orders, onUpdateOrderS
             <button className={`barista-tab${activeTab === 'history' ? ' active' : ''}`} onClick={() => setActiveTab('history')}>
               Historial
             </button>
+            <button className={`barista-tab${activeTab === 'vouchers' ? ' active' : ''}`} onClick={() => setActiveTab('vouchers')}>
+              Cupones
+            </button>
           </div>
         </div>
         <button className="barista-close" onClick={onClose}>Salir</button>
       </header>
 
-      {activeTab === 'queue' ? (
+      {activeTab === 'vouchers' ? (
+        <VoucherPanel cashInventory={cashInventory} onCashChanged={() => void loadCashInventory()} />
+      ) : activeTab === 'queue' ? (
         <div className="barista-board">
           {/* COLUMN 1: Received + Cash */}
           <div className="barista-column">
@@ -238,7 +193,7 @@ export const BaristaView: React.FC<BaristaViewProps> = ({ orders, onUpdateOrderS
                       ))}
                     </div>
                     <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--accent-soft)' }}>
-                      ${order.total.toFixed(2)} · EFECTIVO
+                      ${orderAmountDue(order).toFixed(2)} · EFECTIVO{order.voucherAmount ? ' (resto con cupón)' : ''}
                     </div>
                     <button
                       className="order-action-btn btn-accept"
@@ -447,33 +402,16 @@ export const BaristaView: React.FC<BaristaViewProps> = ({ orders, onUpdateOrderS
               <span>${selectedOrder.total.toFixed(2)}</span>
             </div>
 
+            {cashError && <div className="inline-feedback error" role="alert">{cashError}</div>}
             {selectedOrder.status === 'PENDING_PAYMENT' && selectedOrder.paymentMethod === 'cash' && (
-              <>
-                <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: 'var(--space-3)' }}>Pago en Efectivo</h3>
-                <div className="denom-grid" style={{ marginBottom: 'var(--space-4)' }}>
-                  {Object.keys(DENOM_VALUES).map((key) => (
-                    <div key={key} className="denom-item">
-                      <label>{DENOM_LABELS[key]}</label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={receivedDenoms[key] ?? 0}
-                        onChange={(e) => setReceivedDenoms((prev) => ({ ...prev, [key]: Number(e.target.value) || 0 }))}
-                      />
-                    </div>
-                  ))}
-                </div>
-                <div style={{ fontSize: '16px', fontWeight: 700, marginBottom: 'var(--space-3)' }}>
-                  Recibido: ${Object.entries(receivedDenoms).reduce((sum, [key, qty]) => sum + (DENOM_VALUES[key] || 0) * (qty || 0), 0).toFixed(2)}
-                  {' · '}
-                  Cambio: ${Math.max(0, Object.entries(receivedDenoms).reduce((sum, [key, qty]) => sum + (DENOM_VALUES[key] || 0) * (qty || 0), 0) - selectedOrder.total).toFixed(2)}
-                </div>
-                {cashError && <div className="inline-feedback error" role="alert">{cashError}</div>}
-                <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
-                  <button className="btn btn-primary" disabled={actions.busy} onClick={() => void actions.run(() => handleCashPayment(selectedOrder))}>Cobrar</button>
-                  <button className="btn btn-secondary" onClick={() => { setSelectedOrder(null); setCashError(''); }}>Cerrar</button>
-                </div>
-              </>
+              <CashPaymentPanel
+                key={selectedOrder.id}
+                order={selectedOrder}
+                cashInventory={cashInventory}
+                onPaid={() => { setSelectedOrder(null); setCashError(''); void loadCashInventory(); }}
+                onCancelled={() => { setSelectedOrder(null); setCashError(''); }}
+                onClose={() => { setSelectedOrder(null); setCashError(''); }}
+              />
             )}
 
             {selectedOrder.status !== 'PENDING_PAYMENT' && (

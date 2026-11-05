@@ -20,7 +20,14 @@ export function useDialogFocus(onEscape?: () => void) {
       else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) { event.preventDefault(); first.focus(); }
     };
     dialog.addEventListener('keydown', handler);
-    return () => { dialog.removeEventListener('keydown', handler); if (previous?.isConnected) previous.focus(); };
+    return () => {
+      dialog.removeEventListener('keydown', handler);
+      // Give focus back only if nothing else claimed it (e.g. the next dialog's input), and
+      // without scrolling the page/catalog to the previously focused element.
+      const current = document.activeElement;
+      const unclaimed = !current || current === document.body || dialog.contains(current);
+      if (unclaimed && previous?.isConnected) previous.focus({ preventScroll: true });
+    };
   }, []);
   return ref;
 }

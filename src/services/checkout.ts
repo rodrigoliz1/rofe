@@ -9,6 +9,8 @@ export interface CheckoutDraft {
   submitted: boolean;
   simulation?: boolean;
   order?: Order;
+  /** Change voucher applied as a discount (validated again by the server). */
+  voucher?: { code: string; amount: number };
 }
 const KEY = 'rofe-checkout-v1';
 export function readCheckout(): CheckoutDraft | null {

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { expect, test, devices } from '@playwright/test';
 
 test('production manifest and installation resources have valid responses', async ({ request }) => {
@@ -5,7 +6,7 @@ test('production manifest and installation resources have valid responses', asyn
   expect(response.status()).toBe(200);
   expect(response.headers()['content-type']).toContain('application/manifest+json');
   const manifest = await response.json();
-  expect(manifest).toMatchObject({ id: '/', start_url: '/kiosk', scope: '/', display: 'standalone', orientation: 'landscape', prefer_related_applications: false });
+  expect(manifest).toMatchObject({ id: '/', start_url: '/kiosk', scope: '/', display: 'standalone', orientation: 'any', prefer_related_applications: false });
   expect(JSON.stringify(manifest)).not.toMatch(/localhost|127\.0\.0\.1|192\.168\.|:5173/);
   for (const icon of manifest.icons as Array<{ src: string; sizes: string; type: string; purpose: string }>) {
     const asset = await request.get(icon.src, { maxRedirects: 0 });
@@ -56,7 +57,10 @@ test('kiosk uses the enrolled POS on cold start even after staff access', async 
   await expect(page.getByText('ORDENAR AQUÍ')).toBeVisible();
   await page.getByText('ORDENAR AQUÍ').click();
   await expect(page.getByRole('heading', { name: 'MENÚ', exact: true })).toBeVisible();
-  await page.getByTitle('Panel Barista').click();
+  // The customer-facing kiosk has no visible staff button: hold the logo for 5 s.
+  const logo = (await page.locator('.kiosk-header-brand').boundingBox())!;
+  await page.mouse.move(logo.x + 20, logo.y + logo.height / 2);
+  await page.mouse.down(); await page.waitForTimeout(5_300); await page.mouse.up();
   await page.getByLabel('Correo').fill('admin@rofe.test');
   await page.getByLabel('Contraseña o PIN').fill('TestAdmin123!');
   await page.getByRole('button', { name: 'Ingresar', exact: true }).click();
@@ -64,4 +68,23 @@ test('kiosk uses the enrolled POS on cold start even after staff access', async 
   await page.reload();
   await expect(page.getByText('ORDENAR AQUÍ')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'ROFE Admin' })).toHaveCount(0);
+});
+
+test('catalog photos are cached by the service worker and still load offline', async ({ browser }) => {
+  const manifest = JSON.parse(readFileSync('src/kiosk/productImages.json', 'utf8')) as { products: Record<string, { card?: Record<string, { url: string }> }> };
+  const photo = Object.values(manifest.products.espresso.card!)[0].url;
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, baseURL: 'http://127.0.0.1:4173', serviceWorkers: 'allow' });
+  try {
+    const page = await context.newPage();
+    await page.goto('/kiosk');
+    await page.waitForFunction(() => navigator.serviceWorker.controller?.state === 'activated');
+    expect(await page.evaluate(async (url) => (await fetch(url)).status, photo)).toBe(200);
+    await expect.poll(() => page.evaluate(async (url) => Boolean(await (await caches.open('rofe-photos-v1')).match(url)), photo)).toBe(true);
+    // The shell cache and the photo cache are separate: an app update never evicts photos.
+    expect(await page.evaluate(() => caches.keys())).toEqual(expect.arrayContaining(['rofe-photos-v1']));
+    await context.setOffline(true);
+    expect(await page.evaluate(async (url) => { const response = await fetch(url); return [response.status, (await response.blob()).type]; }, photo)).toEqual([200, 'image/webp']);
+    // API responses are never cached by the worker.
+    expect(await page.evaluate(() => fetch('/api/products').then(() => 'online', () => 'blocked'))).toBe('blocked');
+  } finally { await context.close(); }
 });
