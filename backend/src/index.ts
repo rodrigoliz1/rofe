@@ -309,9 +309,6 @@ async function reconcilePendingPickup(): Promise<void> {
 }
 const reconcilePendingPickupThrottled = () => Date.now() - lastSweepAt >= 60_000 ? reconcilePendingPickup() : Promise.resolve();
 
-  } catch (error) { next(error); }
-});
-
 // --- API Routes ---
 
 // Get active orders (Barista View)
