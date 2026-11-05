@@ -1,13 +1,16 @@
 # Catálogo fotográfico de ROFÉ
 
-## Estado: **PENDIENTE — la nueva colección fotográfica no se ha generado**
+## Estado: colección nueva integrada — 5 de noviembre de 2026
 
-No hay generación de imágenes legítima disponible en esta sesión:
-- **Canva** (`generate-image`): desactivada por el administrador del equipo de Canva.
-- **Figma** (`generate_image`): requiere crear archivos en tu cuenta y consume créditos de IA. Esa acción no estaba autorizada explícitamente y no la reintenté.
-- No hay generadores locales ni modelos en el entorno.
+Se generaron realmente **12 fotografías originales** con `image_gen.imagegen`, se inspeccionaron juntas y se integraron mediante el importador. Las 12 entradas están `approved`: no quedan provisionales ni pendientes para los productos del manifiesto.
 
-**Ninguna foto del catálogo pertenece todavía a la colección nueva.** Las que se ven son fotos antiguas del repositorio, marcadas como *provisionales*. Están optimizadas y recortadas 1:1, pero siguen siendo las mismas imágenes. Los productos sin una foto correcta muestran la ilustración de marca, nunca una foto equivocada.
+Los originales están en `scripts/product-images/originals/`, con procedencia y SHA-256 en `scripts/product-images/provenance.json`. La colección mantiene fondo cálido beige/crema, iluminación suave y una fotografía distinta por producto. La galleta muestra una sola pieza, conforme a la receta existente.
+
+POS, kiosco, QR (incluido hero y modal) y vista previa de administración usan el resolutor del manifiesto. Las subidas posteriores de administración conservan su precedencia. Variantes WebP de 384/640/960 px; los archivos con hashes anteriores se conservan para clientes antiguos. El importador valida el lote antes de aprobarlo y no hace una importación parcial cuando detecta archivos inválidos.
+
+Evidencia visual: [colección completa](evidence/catalog-collection-2026-11-05.jpg), [POS](evidence/catalog-pos.png), [kiosco](evidence/catalog-kiosk-landscape.png), [QR](evidence/catalog-qr-mobile.png).
+
+Las secciones siguientes conservan el diagnóstico y encargo iniciales como referencia histórica; las fotos provisionales descritas en la tabla ya fueron sustituidas por la colección nueva.
 
 ## Diagnóstico del error `espresso.png` (404) y de los productos sin imagen
 

@@ -3,7 +3,7 @@ import { ProductModal } from './ProductModal';
 import { UiIcon } from './UiIcon';
 import { PaymentOutcomeIcon } from './PaymentOutcomeIcon';
 import { usePaymentFeedback } from '../hooks/usePaymentFeedback';
-import { apiUrl } from '../services/api';
+import { productPhoto } from '../services/productImages';
 import { newPickupToken, openStripeCheckout, pickupRequest, readPickupDraft, savePickupDraft, PickupApiError, type PickupAttempt, type PickupMenu, type PickupOrder, type PickupReceipt } from '../services/pickup';
 import type { CartItem, Product } from '../types';
 import { pickupSummary } from '../utils/pickupSummary';
@@ -186,7 +186,7 @@ export default function PickupPage() {
   const products = (menu?.products ?? []).filter((product) => (category === 'all' || product.category === category) && normalize(`${product.name} ${product.description}`).includes(normalize(query)));
   const copy = order ? stateCopy[order.status] ?? stateCopy.PENDING_PAYMENT : null;
   const progress = order ? orderStates.indexOf(order.status) : -1;
-  const imageUrl = (image?: string) => image?.startsWith('/api/') ? apiUrl(image) : image;
+  const heroPhoto = productPhoto(menu?.products.find((product) => product.id === 'espresso') ?? { id: 'espresso', image: '' }).detail;
 
   return <div className={`pickup-app pickup-screen-${screen}`}>
     <a className="skip-link" href="#pickup-main">Saltar al menú</a>
@@ -210,7 +210,7 @@ export default function PickupPage() {
         {orderError && !orderMissing && <p className="pickup-error" role="alert">{orderError} Seguiremos intentando recuperar el estado.</p>}{error && <p className="pickup-error" role="alert">{error}</p>}
       </section> : <div className="pickup-layout">
         <section className="pickup-menu-surface">
-          <div className="pickup-hero"><div className="pickup-hero-copy"><h1 ref={screen === 'menu' ? headingRef : undefined} tabIndex={-1}>Tu café,<br />a tu ritmo<span>.</span></h1><p>Elige tu favorito, paga desde aquí y recógelo en barra.</p><a href="#pickup-products" className="pickup-hero-link">Explorar menú<UiIcon name="arrow" size={18} /></a></div><img src="/espresso.webp" alt="Espresso ROFÉ recién preparado" className="pickup-hero-image" /></div>
+          <div className="pickup-hero"><div className="pickup-hero-copy"><h1 ref={screen === 'menu' ? headingRef : undefined} tabIndex={-1}>Tu café,<br />a tu ritmo<span>.</span></h1><p>Elige tu favorito, paga desde aquí y recógelo en barra.</p><a href="#pickup-products" className="pickup-hero-link">Explorar menú<UiIcon name="arrow" size={18} /></a></div><img src={heroPhoto ?? "/favicon.svg"} alt="Espresso ROFÉ recién preparado" className="pickup-hero-image" /></div>
           <div className="pickup-place"><UiIcon name="pin" size={20} /><div><strong>{menu?.locationName ?? 'ROFÉ Espresso Bar'}</strong><span>{menu?.locationAddress || 'Pedido para recoger en barra'}</span></div></div>
           {menu && !menu.acceptingOrders && <p className="pickup-notice">Los pedidos en línea están pausados. Puedes explorar el menú y pedir directamente en barra.</p>}
           <div className="pickup-menu-navigation" id="pickup-products"><h2>¿Qué se te antoja?</h2><label className="pickup-search"><UiIcon name="search" /><span className="sr-only">Buscar en el menú</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Busca tu próxima pausa" /></label><div className="pickup-categories" aria-label="Categorías">{categories.map((item) => <button key={item.id} aria-pressed={category === item.id} onClick={() => setCategory(item.id)}>{item.name}</button>)}</div></div>
@@ -219,7 +219,7 @@ export default function PickupPage() {
             {menuError && <div className="pickup-empty" role="alert"><p>{menuError}</p><button className="pickup-secondary" onClick={() => void loadMenu()}>Volver a cargar</button></div>}
             {!loading && !menuError && products.length === 0 && <div className="pickup-empty"><UiIcon name="search" size={32} /><p>No encontramos ese antojo.</p><button className="pickup-text-button" onClick={() => { setQuery(''); setCategory('all'); }}>Ver todo el menú</button></div>}
             {products.map((product) => <button key={product.id} className="pickup-product" disabled={product.stock !== undefined && product.stock <= 0} onClick={() => { if (draft.attempt) { navigate('receipt'); return; } setSelected(product); }}>
-              <div className="pickup-product-copy"><h3>{product.name}</h3><p>{product.description}</p><strong>{money(product.price)}<span>MXN</span></strong></div><div className="pickup-product-visual">{product.image ? <img src={imageUrl(product.image)} alt="" loading="lazy" /> : <UiIcon name="coffee" size={36} />}<span className="pickup-product-add" aria-hidden="true"><UiIcon name="plus" size={20} /></span>{product.stock !== undefined && product.stock <= 0 && <span className="pickup-sold-out">Agotado</span>}</div>
+              <div className="pickup-product-copy"><h3>{product.name}</h3><p>{product.description}</p><strong>{money(product.price)}<span>MXN</span></strong></div><div className="pickup-product-visual">{productPhoto(product).card ? <img src={productPhoto(product).card!} alt="" loading="lazy" decoding="async" onError={(event) => { event.currentTarget.src = "/favicon.svg"; }} /> : <UiIcon name="coffee" size={36} />}<span className="pickup-product-add" aria-hidden="true"><UiIcon name="plus" size={20} /></span>{product.stock !== undefined && product.stock <= 0 && <span className="pickup-sold-out">Agotado</span>}</div>
             </button>)}
           </div>
           {error && screen === 'menu' && <p className="pickup-error" role="alert">{error}</p>}
@@ -241,6 +241,6 @@ export default function PickupPage() {
       </div>}
     </main>
     {screen === 'menu' && count > 0 && <div className="pickup-mobile-cart"><button className="pickup-primary" onClick={() => navigate('cart')}><span className="pickup-cart-count">{count}</span><span>Ver mi pedido</span><strong>{money(total)}</strong><UiIcon name="arrow" /></button></div>}
-    {selected && <ProductModal key={selected.id} product={selected} onClose={() => setSelected(null)} onAddToCart={addItem} />}
+    {selected && <ProductModal key={selected.id} showPhoto product={selected} onClose={() => setSelected(null)} onAddToCart={addItem} />}
   </div>;
 }

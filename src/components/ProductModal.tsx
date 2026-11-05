@@ -10,7 +10,7 @@ interface ProductModalProps {
   product: Product;
   onClose: () => void;
   onAddToCart: (item: CartItem) => void;
-  /** Kiosk: show the catalog photo at the top of the sheet. */
+  /** Use the same catalog photo in every product surface. */
   showPhoto?: boolean;
 }
 
@@ -26,7 +26,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   product,
   onClose,
   onAddToCart,
-  showPhoto = false,
+  showPhoto = true,
 }) => {
   const photo = showPhoto ? productPhoto(product).detail : null;
   const dialogRef = useDialogFocus(onClose);

@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { apiUrl } from '../services/api';
 import { useDialogFocus } from '../hooks/useDialogFocus';
 import type { Product, CustomVariantGroup } from '../types';
+import { productPhoto } from '../services/productImages';
 
 interface RawInventoryItem {
   id: string;
@@ -31,7 +32,7 @@ export const ProductEditorModal: React.FC<ProductEditorModalProps> = ({ product,
   const [customizable, setCustomizable] = useState(product ? product.customizable : true);
   
   const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string>(product?.image || '');
+  const [imagePreview, setImagePreview] = useState<string>(product ? productPhoto(product).detail || '' : '');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
