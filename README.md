@@ -68,7 +68,7 @@ La primera visita muestra “Autoriza esta terminal”. Usa el mismo valor confi
 3. Configura `SUPABASE_URL` y `SUPABASE_SERVICE_KEY` sólo en el backend.
 4. Verifica `GET /ready` antes de enviar tráfico.
 
-Aplica **001, 002, 003, 004 y 005**, en ese orden. El arranque verifica la versión del esquema; no modifica la base automáticamente. Las migraciones añaden protección frente a eventos tardíos, reservas de insumos, compras en efectivo transaccionales y el canal público de pickup.
+Aplica **001 a 008**, en orden. El arranque verifica la versión del esquema (mínimo 5) y no modifica la base automáticamente. Las migraciones añaden protección frente a eventos tardíos, reservas de insumos, compras en efectivo transaccionales, el canal público de pickup (005), `updated_at` para el tiempo real en Vercel (006), cupones de cambio (007, versión 7) y el libro de cupones como pasivo (008, versión 8). Sin 007 los cupones responden «falta la migración». Sin 008, usar un cupón en un pedido responde 503. Detalles en [docs/CHANGE_VOUCHERS.md](docs/CHANGE_VOUCHERS.md).
 
 `001_rofe_1_0.sql` conserva pedidos existentes, añade sesiones, dispositivos, auditoría, compras, proveedores, movimientos de inventario, caja, producción y cierres; también instala funciones transaccionales e idempotentes para pagos, caja, compras, ajustes, producción, devoluciones y cierre.
 
@@ -179,6 +179,6 @@ La secuencia de apertura, caída de red, compra, merma, devolución y cierre est
 
 ## Estado de preparación y evidencia
 
-Consulta [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md) para los cambios verificados y los requisitos de la validación real. El repositorio incluye CI con build, lint, tipos, pruebas, auditoría de dependencias, navegador y PostgreSQL.
+Consulta [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md) para los cambios verificados y los requisitos de la validación real. Para retomar el desarrollo (por ejemplo, con Codex en local), empieza por [docs/CODEX_HANDOFF.md](docs/CODEX_HANDOFF.md). El repositorio incluye CI con build, lint, tipos, pruebas, auditoría de dependencias, navegador y PostgreSQL.
 
 Para desarrollo o autohospedaje sigue disponible el contenedor: `docker build -t rofe-api ./backend`. Producción se despliega en Vercel.
