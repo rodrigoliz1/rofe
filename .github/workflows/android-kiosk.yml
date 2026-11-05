@@ -57,7 +57,7 @@ jobs:
           cp app/build/outputs/apk/staging/*.apk dist/
           cp app/build/outputs/apk/release/*.apk dist/
           (cd dist && sha256sum *.apk | tee SHA256SUMS)
-          "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs dist/rofe-kiosk-debug.apk | head -3
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs dist/rofe-kiosk-debug.apk | head -3
       - uses: actions/upload-artifact@v4
         with:
           name: rofe-kiosk-apk
