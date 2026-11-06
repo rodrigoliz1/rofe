@@ -1,5 +1,10 @@
 # ROFE Kiosk (Android)
 
+El proyecto Gradle también incluye `:barista` y el módulo nativo independiente
+`:point` para preparar **ROFÉ Point** como Main App privada. Este último no usa el
+contenedor WebView, no se instala en una Point comercial y no modifica Orders API.
+Su arquitectura, builds y límites están en [ROFE_POINT.md](../docs/ROFE_POINT.md).
+
 Contenedor Android dedicado para la terminal de autoservicio de ROFÉ en una tablet **Lenovo Tab M10** (o cualquier tablet Android 8.0+).
 La APK **no contiene lógica de negocio**: carga `https://<dominio>/kiosk` y todo lo que el cliente ve (catálogo, precios, modificadores, pedidos y pagos) llega del backend y la web app existentes. Un cambio de menú o precio **no requiere una APK nueva**.
 

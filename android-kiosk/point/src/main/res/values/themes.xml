@@ -1,0 +1,16 @@
+<resources>
+    <style name="Theme.RofePoint" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">@font/outfit</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowBackground">@color/point_background</item>
+        <item name="android:colorAccent">@color/point_gold</item>
+        <item name="android:statusBarColor">@color/point_background</item>
+        <item name="android:navigationBarColor">@color/point_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowSplashScreenBackground">@color/point_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_point</item>
+    </style>
+</resources>

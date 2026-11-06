@@ -2,6 +2,23 @@
 
 Fecha: 5 de noviembre de 2026. Este documento basta para continuar sin el historial de la sesión anterior. Las respuestas al dueño van **en español**.
 
+### ROFÉ Point — trabajo aislado para homologación
+
+En `codex/rofe-point-main-app`, partiendo del estado limpio publicado `6cfb68f`,
+se prepara `android-kiosk/point`: Kotlin nativo, variantes prototipo/Main App,
+SDK oficial 7.3.1 con hash verificado y configuración financiera deliberadamente
+no habilitada. No cambia Kiosco, Barista, backend, Orders API ni SELF_SERVICE.
+No instalar ni seleccionar HOME en el Point comercial. La recepción/retorno de
+órdenes externas y el bloqueo integral requieren validación oficial de MP.
+Consultar [ROFE_POINT.md](ROFE_POINT.md), la
+[matriz y homologación](ROFE_POINT_HOMOLOGATION.md) y
+[resultados de validación](ROFE_POINT_VALIDATION.md).
+El propietario autoriza publicar esta rama y abrir un PR **Draft** contra `main`
+para conservar el prototipo revisable mientras responde SmartApps. No autoriza
+merge, despliegue de Point, cambios al flujo financiero ni una release comercial.
+El [checklist de homologación](ROFE_POINT_HOMOLOGATION_CHECKLIST.md) distingue lo
+cumplido, trabajo sin terminal, dependencias de MP, pruebas sandbox y evidencias.
+
 Continuación en la Mac: el diagnóstico y la configuración aislada se conservan en la rama local **`codex/rofe-development`**, basada en el estado de la rama Claude descrito abajo. Consulta [LOCAL_DEVELOPMENT.md](LOCAL_DEVELOPMENT.md) para arrancar y [CATALOG_REPLACEMENT_PLAN.md](CATALOG_REPLACEMENT_PLAN.md) para el orden de correcciones y la sustitución fotográfica. Sin push ni cambios a producción.
 
 ## 1. Estado del repositorio
