@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 // Test the actual serverless entry guard; it must run before importing the backend.
 // @ts-expect-error The entry module is native JavaScript for Vercel.
-import { deploymentHandler } from '../../api/environment-boundary.js';
+import { deploymentHandler } from '../../server/environment-boundary.js';
 
 describe('deployment isolation', () => {
   it.each(['preview', 'development', undefined])('never loads the backend for Vercel %s', async VERCEL_ENV => {

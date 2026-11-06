@@ -26,7 +26,7 @@ El GET de metadatos de Vercel confirmó 17 registros. Hay registros únicos que 
 
 Medidas preparadas:
 
-- `api/environment-boundary.js` devuelve 503 en Vercel preview/development o sin etapa reconocida, **antes de importar** el backend. No se inicializan Supabase, autenticación ni integraciones.
+- `server/environment-boundary.js` devuelve 503 en Vercel preview/development o sin etapa reconocida, **antes de importar** el backend. No se inicializan Supabase, autenticación ni integraciones.
 - `getEnv()` rechaza el arranque del backend en esos despliegues, incluso fuera del entrypoint habitual.
 - Desarrollo rechaza credenciales remotas heredadas de Supabase, Point o Stripe. `npm run dev`, E2E y Vitest utilizan datos locales/temporales y vacían expresamente las integraciones. No se decide si una credencial es de prueba por su prefijo.
 - El frontend compilado como preview ignora `VITE_API_URL` y usa exclusivamente su origen, cuyo backend está bloqueado.
@@ -100,7 +100,7 @@ No se modifica el payload de creación de Orders API, sus credenciales, terminal
 - Primera aplicación y reaplicación de 010/011 sobre históricos ficticios: huellas de sesiones, caja, movimientos, pedidos e inventario sin alteración de los valores preexistentes.
 - E2E: 82 pruebas aprobadas en la suite completa del navegador, incluida la regresión de cupones y el panel de pendientes. Los checks de CI se consultan en el PR.
 - Captura del panel con datos de prueba: [barista-stabilization-point.png](evidence/barista-stabilization-point.png).
-- Lint, typecheck de ambos proyectos, builds frontend/backend y validación PWA. El navegador emula la M10; esto no acredita una prueba física Android ni un pago real.
+- Lint, typecheck de ambos proyectos, builds frontend/backend, validación PWA y prueba del entrypoint serverless real con el backend compilado y datos temporales. El navegador emula la M10; esto no acredita una prueba física Android ni un pago real.
 
 Una ejecución inicial detectó que se había omitido el resumen de cupones en la respuesta del cierre. Se corrigió y la regresión volvió a pasar. No se eliminó ni debilitó la aserción financiera.
 

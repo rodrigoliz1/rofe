@@ -30,6 +30,8 @@ jobs:
         run: npm test && npm --prefix backend test
       - name: Build backend
         run: npm --prefix backend run build
+      - name: Verify isolated serverless entry
+        run: node scripts/test-serverless-entry.mjs
       - name: Build frontend
         run: npm run build
       - name: Audit production dependencies

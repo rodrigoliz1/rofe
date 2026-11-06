@@ -17,7 +17,7 @@
     "postbuild": "node scripts/build-pwa.mjs && node scripts/validate-pwa.mjs",
     "validate:pwa": "node scripts/validate-pwa.mjs",
     "audit:pwa": "node scripts/audit-pwa.mjs",
-    "verify": "npm run lint && npm run typecheck && npm test && npm --prefix backend run typecheck && npm --prefix backend test && npm run build && npm --prefix backend run build"
+    "verify": "npm run lint && npm run typecheck && npm test && npm --prefix backend run typecheck && npm --prefix backend test && npm run build && npm --prefix backend run build && node scripts/test-serverless-entry.mjs"
   },
   "dependencies": {
     "idb": "^8.0.3",
