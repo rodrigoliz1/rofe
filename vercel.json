@@ -121,5 +121,10 @@
         }
       ]
     }
-  ]
+  ],
+  "git": {
+    "deploymentEnabled": {
+      "codex/barista-operation-stabilization": false
+    }
+  }
 }

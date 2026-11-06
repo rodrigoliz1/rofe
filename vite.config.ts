@@ -8,7 +8,7 @@ const commit = (process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.GITHUB_SHA ?? '
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
-  define: { __ROFE_WEB_VERSION__: JSON.stringify(commit ? `${version}+${commit}` : version) },
+  define: { 'import.meta.env.VITE_BACKEND_DISABLED': JSON.stringify(Boolean(process.env.VERCEL) && process.env.VERCEL_ENV !== 'production'), __ROFE_WEB_VERSION__: JSON.stringify(commit ? `${version}+${commit}` : version) },
   build: { outDir: process.env.ROFE_BUILD_OUT_DIR || 'dist' },
   server: {
     proxy: { '/api': 'http://127.0.0.1:3000', '/health': 'http://127.0.0.1:3000', '/ready': 'http://127.0.0.1:3000' },

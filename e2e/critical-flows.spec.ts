@@ -250,7 +250,7 @@ test('cash session opens, receives a sale and closes with zero difference', asyn
   expect(paid.status()).toBe(200);
   expect((await paid.json()).order.paymentStatus).toBe('APPROVED');
 
-  const closed = await request.post('http://127.0.0.1:3100/api/admin/cash/session/close', { headers: adminHeaders, data: { denominations: { bill_100: 1, bill_50: 1, coin_5: 1 } } });
+  const closed = await request.post('http://127.0.0.1:3100/api/admin/cash/session/close', { headers: adminHeaders, data: { sessionId: (await (await request.get('http://127.0.0.1:3100/api/admin/cash/session', { headers: adminHeaders })).json()).current.id, denominations: { bill_100: 1, bill_50: 1, coin_5: 1 } } });
   expect(closed.status()).toBe(200);
   expect(await closed.json()).toMatchObject({ expectedCash: 155, countedCash: 155, difference: 0 });
 });
@@ -453,7 +453,7 @@ test('cash purchases update drawer and inventory together, and a failed purchase
   const rejected = await request.post('http://127.0.0.1:3100/api/admin/purchases', { headers, data: { ...purchase, operationId: crypto.randomUUID(), cashDenominations: { bill_50: 10 }, items: [{ ingredientId: 'coffee_beans', quantity: 1000, unitCost: 0.5 }] } });
   expect(rejected.status()).toBe(409);
   expect(await (await request.get('http://127.0.0.1:3100/api/admin/raw-inventory', { headers })).json()).toEqual(before);
-  const closed = await request.post('http://127.0.0.1:3100/api/admin/cash/session/close', { headers, data: { denominations: { bill_50: 1 } } });
+  const closed = await request.post('http://127.0.0.1:3100/api/admin/cash/session/close', { headers, data: { sessionId: (await (await request.get('http://127.0.0.1:3100/api/admin/cash/session', { headers: headers })).json()).current.id, denominations: { bill_50: 1 } } });
   expect(closed.status()).toBe(200);
   expect(await closed.json()).toMatchObject({ expectedCash: 50, countedCash: 50, difference: 0 });
 });

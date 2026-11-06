@@ -28,11 +28,16 @@ test('open, retry concurrently, operate and close exactly one cash session', asy
   for (let retry = 0; retry < 2; retry++) expect((await request(app).post('/api/admin/cash/transaction').set('Authorization', authorization).send(movement)).status).toBe(200);
   const state = await request(app).get('/api/admin/cash/session').set('Authorization', authorization);
   expect(state.body.history).toHaveLength(1); expect(state.body.current.expectedCash).toBe(250);
-  const close = await request(app).post('/api/admin/cash/session/close').set('Authorization', authorization).send({ denominations: { bill_100: 2, bill_50: 1 } });
+  const close = await request(app).post('/api/admin/cash/session/close').set('Authorization', authorization).send({ sessionId: operationId, denominations: { bill_100: 2, bill_50: 1 } });
   expect(close.status).toBe(200); expect(close.body.difference).toBe(0);
   expect((await request(app).post('/api/admin/cash/session/open').set('Authorization', authorization).send(payload)).body.error.code).toBe('CASH_OPEN_OPERATION_COMPLETED');
   const next = await request(app).post('/api/admin/cash/session/open').set('Authorization', authorization).send({ ...payload, operationId: randomUUID() });
   expect(next.status).toBe(201);
+  const replay = await request(app).post('/api/admin/cash/session/close').set('Authorization', authorization).send({ sessionId: operationId, denominations: { bill_100: 2, bill_50: 1 } });
+  expect(replay.status).toBe(200);
+  expect((await request(app).get('/api/admin/cash/session').set('Authorization', authorization)).body.current.id).toBe(next.body.id);
+  const missingId = await request(app).post('/api/admin/cash/session/close').set('Authorization', authorization).send({ denominations: {} });
+  expect(missingId.status).toBe(400);
 });
 test('invalid denominations and unauthorized openings never mutate cash', async () => {
   expect((await request(app).post('/api/admin/cash/session/open').send({ denominations: {} })).status).toBe(401);

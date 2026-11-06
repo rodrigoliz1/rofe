@@ -9,6 +9,7 @@ import { AccessPanel } from './AccessPanel';
 import { ReportsPanel } from './ReportsPanel';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { DenominationInput } from './DenominationInput';
+import { PendingPointPanel } from './PendingPointPanel';
 import { TerminalPanel } from './TerminalPanel';
 import { UiIcon, type UiIconName } from './UiIcon';
 import { ProductionPanel } from './ProductionPanel';
@@ -277,7 +278,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ products, onClose, onInven
 
   const handleCloseSession = async () => {
     if (!window.confirm('¿Cerrar la sesión de caja actual? Se registrará un corte.')) return;
-    const res = await apiFetch('/api/admin/cash/session/close', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ denominations: closureDenominations }) });
+    const res = await apiFetch('/api/admin/cash/session/close', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: cashSession?.id, denominations: closureDenominations }) });
     if (!res.ok) throw new Error(await publicError(res));
     await loadClosureData(); await loadMetrics();
   };
@@ -331,7 +332,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ products, onClose, onInven
         {txError && <p className="inline-feedback error" role="alert">{txError}</p>}
         {actions.error && <p className="inline-feedback error" role="alert">{actions.error}</p>}
         {actions.busy && <p role="status" className="admin-saving">Guardando cambios…</p>}
-        {activeTab === 'terminal' && <><header><h2>Terminal Point</h2><p>Conexión y disponibilidad del cobro con tarjeta.</p></header><div className="admin-content-body"><TerminalPanel /></div></>}
+        {activeTab === 'terminal' && <><header><h2>Terminal Point</h2><p>Conexión y disponibilidad del cobro con tarjeta.</p></header><div className="admin-content-body"><TerminalPanel /><PendingPointPanel /></div></>}
         {/* ===== DASHBOARD ===== */}
         {activeTab === 'dashboard' && (
           <>

@@ -20,7 +20,7 @@ test('administrative recipe → customized kiosk order → cash → preparation 
   const stock = (rows: typeof before, id: string) => rows.find(i => i.id === id)!.stock;
   try {
     const current = await (await request.get(`${API}/api/admin/cash/session`, { headers: admin })).json();
-    if (current.current) await request.post(`${API}/api/admin/cash/session/close`, { headers: admin, data: { denominations: await (await request.get(`${API}/api/admin/cash`, { headers: admin })).json() } });
+    if (current.current) await request.post(`${API}/api/admin/cash/session/close`, { headers: admin, data: { sessionId: (await (await request.get('http://127.0.0.1:3100/api/admin/cash/session', { headers: admin })).json()).current.id, denominations: await (await request.get(`${API}/api/admin/cash`, { headers: admin })).json() } });
     expect((await request.post(`${API}/api/admin/cash/session/open`, { headers: admin, data: { operationId: randomUUID(), denominations: { bill_20: 10, coin_5: 10, coin_2: 10, coin_1: 10 } } })).status()).toBe(201);
     await page.goto('/kiosk'); await page.getByLabel('Nombre de la terminal').fill('Kiosco recetas'); await page.getByLabel('Clave de registro').fill('e2e-device-enrollment-secret'); await page.getByRole('button', { name: 'Autorizar terminal', exact: true }).click(); await page.getByText('ORDENAR AQUÍ', { exact: true }).click();
     await page.getByRole('button', { name: /^Bebida de prueba/ }).click();

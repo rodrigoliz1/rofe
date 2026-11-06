@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, ConnectionError, apiJson, login, logout, getPrincipal } from './api';
+import { ApiError, ConnectionError, apiUrl, apiJson, login, logout, getPrincipal } from './api';
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 describe('transport boundary', () => {
   it('keeps a validation failure distinct from a lost connection', async () => {
     vi.stubGlobal('window', { location: { origin: 'https://rofe.test' } });
@@ -38,4 +38,11 @@ it('shows the actionable cash backend error together with its support code', asy
     requestId: 'cash-support-test',
   }), { status: 503, headers: { 'Content-Type': 'application/json' } })));
   await expect(apiJson('/api/admin/cash/session/open')).rejects.toThrow('La caja necesita una actualización del sistema. Contacta a Administración. Código de soporte: cash-support-test.');
+});
+
+it('a preview ignores a production API URL even when it was mistakenly inherited', () => {
+  vi.stubGlobal('window', { location: { origin: 'https://isolated-preview.test' } });
+  vi.stubEnv('VITE_API_URL', 'https://production.example');
+  vi.stubEnv('VITE_BACKEND_DISABLED', 'true');
+  expect(apiUrl('/api/orders')).toBe('https://isolated-preview.test/api/orders');
 });

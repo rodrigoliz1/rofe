@@ -4,6 +4,9 @@ import * as path from 'path';
 import { getEnv } from './config/env';
 import { randomUUID } from 'crypto';
 import { applyPurchaseValue, applyWasteValue } from './domain/inventory';
+import { isPendingPoint, type PointJob, type PointOutcome } from './payments/pointReconciliation';
+import { buildOperationalReport } from './accounting/reports';
+import { totalDenominations } from './domain/cash';
 
 export interface DbRawInventory {
   id: string; // e.g., 'coffee_beans', 'milk_whole'
@@ -273,6 +276,9 @@ export interface DbOrder {
   notes?: string;
   cancellationReason?: string;
   inventoryAppliedAt?: string;
+  paidAt?: string;
+  paidCashSessionId?: string;
+  refundedAt?: string;
   createdAt: string;
   updatedAt?: string;
 }
@@ -326,6 +332,12 @@ export interface CashPaymentInput {
 export interface DbAdapter {
   initialize(): Promise<void>;
   getOrders(): Promise<DbOrder[]>;
+  pointReconciliationAvailable(): Promise<boolean>;
+  listUnassignedPoint(): Promise<DbOrder[]>;
+  listPendingPoint(): Promise<Array<{ order: DbOrder; job?: PointJob }>>;
+  claimPointReconciliation(limit: number): Promise<PointJob[]>;
+  finishPointReconciliation(orderId: string, leaseToken: string, outcome: PointOutcome, delaySeconds: number): Promise<boolean>;
+  closeCashSessionConsistently(sessionId: string, denominations: Record<string, number>, userId: string, notes?: string): Promise<DbCashSession>;
   getOrdersUpdatedSince(sinceIso: string): Promise<DbOrder[]>;
   getOrderById(id: string): Promise<DbOrder | undefined>;
   getOrderByOperationId(operationId: string): Promise<DbOrder | undefined>;
@@ -411,6 +423,7 @@ export class JsonDbAdapter implements DbAdapter {
     }
   }
   private data: {
+    pointJobs?: PointJob[];
     pickupSettings?: DbPickupSettings;
     inventoryReservations?: Array<{ orderId: string; consumption: DbInventoryConsumption[] }>;
     changeVouchers?: DbChangeVoucher[];
@@ -651,7 +664,7 @@ export class JsonDbAdapter implements DbAdapter {
         createdAt: now,
       });
     }
-    Object.assign(order, { status: 'PAID', paymentStatus: 'APPROVED', paymentId, inventoryAppliedAt: now, updatedAt: now });
+    Object.assign(order, { status: 'PAID', paymentStatus: 'APPROVED', paymentId, inventoryAppliedAt: now, paidAt: now, paidCashSessionId: this.data.cashSessions.find(s => !s.closedAt)?.id, updatedAt: now });
     if (order.paymentMethod === 'card') {
       this.data.transactions.push({ id: this.data.transactions.length + 1, type: 'card_payment', amount: order.total, description: `Pago con tarjeta para orden ${order.folio || order.id}`, denominations: {}, created_at: now });
     }
@@ -691,7 +704,7 @@ export class JsonDbAdapter implements DbAdapter {
     }
     for (const [denomination, count] of Object.entries(input.denominations)) this.data.cashRegister[denomination] -= count;
     const now = new Date().toISOString();
-    this.data.transactions.push({ id: this.data.transactions.length + 1, type: 'voucher_payout', amount: input.amount, description: `Pago en efectivo del cupón de cambio ${input.code}`, denominations: input.denominations, created_at: now });
+    this.data.transactions.push({ id: this.data.transactions.length + 1, type: 'voucher_payout', amount: input.amount, description: `Pago en efectivo del cupón de cambio ${input.code}`, denominations: input.denominations, cashSessionId: this.data.cashSessions.find(s => !s.closedAt)?.id, created_at: now });
     redemptions.push({ id: randomUUID(), voucherId: voucher.id, kind: 'CASH', amount: input.amount, operationId: input.operationId, status: 'APPLIED', denominations: input.denominations, userId: input.userId, createdAt: now });
     Object.assign(voucher, { balance: 0, status: 'REDEEMED', updatedAt: now });
     await this.save();
@@ -790,10 +803,10 @@ export class JsonDbAdapter implements DbAdapter {
       inventory.cost = valuation.totalCost;
       this.data.inventoryMovements.push({ id: `${input.orderId}:${item.ingredientId}`, ingredientId: item.ingredientId, quantity: -item.quantity, movementType: 'SALE', orderId: input.orderId, unitCostSnapshot: valuation.unitCost, createdAt: now });
     }
-    Object.assign(order, { status: 'PAID', paymentStatus: 'APPROVED', paymentId: input.paymentId, inventoryAppliedAt: now, updatedAt: now });
+    Object.assign(order, { status: 'PAID', paymentStatus: 'APPROVED', paymentId: input.paymentId, inventoryAppliedAt: now, paidAt: now, paidCashSessionId: this.data.cashSessions.find(s => !s.closedAt)?.id, updatedAt: now });
     const nextId = this.data.transactions.length + 1;
-    this.data.transactions.push({ id: nextId, type: 'payment', amount: input.receivedAmount, description: `Pago en efectivo recibido para orden ${input.orderId}`, denominations: input.receivedDenominations, created_at: now });
-    if (input.changeAmount > 0) this.data.transactions.push({ id: nextId + 1, type: 'change', amount: input.changeAmount, description: `Cambio devuelto para orden ${input.orderId}`, denominations: input.changeDenominations, created_at: now });
+    this.data.transactions.push({ id: nextId, type: 'payment', amount: input.receivedAmount, description: `Pago en efectivo recibido para orden ${input.orderId}`, denominations: input.receivedDenominations, cashSessionId: order.paidCashSessionId, created_at: now });
+    if (input.changeAmount > 0) this.data.transactions.push({ id: nextId + 1, type: 'change', amount: input.changeAmount, description: `Cambio devuelto para orden ${input.orderId}`, denominations: input.changeDenominations, cashSessionId: order.paidCashSessionId, created_at: now });
     for (const [denomination, count] of Object.entries(input.receivedDenominations)) this.data.cashRegister[denomination] = (this.data.cashRegister[denomination] || 0) + count;
     for (const [denomination, count] of Object.entries(input.changeDenominations)) {
       if ((this.data.cashRegister[denomination] || 0) < count) throw new Error(`Insufficient cash denomination: ${denomination}`);
@@ -830,8 +843,8 @@ export class JsonDbAdapter implements DbAdapter {
           this.data.cashRegister[denomination] -= count;
         }
       }
-      this.data.transactions.push({ id: this.data.transactions.length + 1, type: 'refund', amount: order.paymentMethod === 'cash' ? amountDue(order) : 0, description: `Devolución de orden ${order.folio || order.id}: ${input.reason}`, denominations: input.cashDenominations || {}, created_at: now });
-      Object.assign(order, { status: 'REFUNDED', paymentStatus: 'REFUNDED', updatedAt: now });
+      this.data.transactions.push({ id: this.data.transactions.length + 1, type: 'refund', amount: order.paymentMethod === 'cash' ? amountDue(order) : 0, description: `Devolución de orden ${order.folio || order.id}: ${input.reason}`, denominations: input.cashDenominations || {}, cashSessionId: this.data.cashSessions.find(s => !s.closedAt)?.id, created_at: now });
+      Object.assign(order, { status: 'REFUNDED', paymentStatus: 'REFUNDED', refundedAt: now, updatedAt: now });
       await this.save();
       return true;
     });
@@ -940,7 +953,9 @@ export class JsonDbAdapter implements DbAdapter {
           if ((this.data.cashRegister[denomination] || 0) < count) throw new Error(`Insufficient cash denomination: ${denomination}`);
         }
       }
-      const newTx = { ...transaction, id: this.data.transactions.length + 1, created_at: new Date().toISOString() };
+      const session = this.data.cashSessions.find(s => !s.closedAt);
+      if (!session) throw new Error('cash_session_required');
+      const newTx = { ...transaction, cashSessionId: session.id, id: this.data.transactions.length + 1, created_at: new Date().toISOString() };
       this.data.transactions.push(newTx);
       for (const [denomination, count] of Object.entries(transaction.denominations)) {
         this.data.cashRegister[denomination] = (this.data.cashRegister[denomination] || 0) + count * (subtractsCash ? -1 : 1);
@@ -1077,6 +1092,56 @@ export class JsonDbAdapter implements DbAdapter {
     return true;
   }
   async getInventoryMovements(): Promise<DbInventoryMovement[]> { await this.read(); return this.data.inventoryMovements; }
+  async pointReconciliationAvailable(): Promise<boolean> { return true; }
+  async listUnassignedPoint(): Promise<DbOrder[]> {
+    await this.read();
+    return this.data.orders.filter(o => o.paymentMethod === 'card' && o.paymentProvider !== 'STRIPE' && o.channel !== 'QR_PICKUP' && o.paidAt && !o.paidCashSessionId && ['APPROVED','REFUNDED'].includes(o.paymentStatus ?? '')).slice(-100);
+  }
+  async listPendingPoint(): Promise<Array<{ order: DbOrder; job?: PointJob }>> {
+    await this.read();
+    return this.data.orders.filter(isPendingPoint).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(0, 100)
+      .map(order => ({ order, job: this.data.pointJobs?.find(job => job.orderId === order.id) }));
+  }
+  async claimPointReconciliation(limit: number): Promise<PointJob[]> {
+    await this.read();
+    const now = Date.now(); const jobs = this.data.pointJobs ??= [];
+    const claimed: PointJob[] = [];
+    for (const order of [...this.data.orders].filter(isPendingPoint).sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
+      if (claimed.length >= Math.min(limit, 5)) break;
+      if (Date.parse(order.createdAt) > now - 30_000) continue;
+      let job = jobs.find(j => j.orderId === order.id);
+      if (!job) { job = { orderId: order.id, attempts: 0, outcome: 'PENDING_PROVIDER', nextAttemptAt: new Date(now).toISOString() }; jobs.push(job); }
+      if (Date.parse(job.nextAttemptAt) > now || (job.leaseUntil && Date.parse(job.leaseUntil) > now)) continue;
+      Object.assign(job, { attempts: job.attempts + 1, leaseToken: randomUUID(), leaseUntil: new Date(now + 180_000).toISOString(), lastAttemptAt: new Date(now).toISOString() });
+      claimed.push({ ...job });
+    }
+    await this.save(); return claimed;
+  }
+  async finishPointReconciliation(orderId: string, leaseToken: string, outcome: PointOutcome, delaySeconds: number): Promise<boolean> {
+    await this.read(); const job = this.data.pointJobs?.find(j => j.orderId === orderId && j.leaseToken === leaseToken);
+    if (!job) return false;
+    Object.assign(job, { outcome, leaseToken: undefined, leaseUntil: undefined, nextAttemptAt: new Date(Date.now() + delaySeconds * 1000).toISOString() });
+    await this.save(); return true;
+  }
+  async closeCashSessionConsistently(sessionId: string, denominations: Record<string, number>, userId: string, notes?: string): Promise<DbCashSession> {
+    await this.read();
+    const session = this.data.cashSessions.find(s => s.id === sessionId);
+    if (!session) throw new Error('cash_session_not_found');
+    if (session.closedAt) {
+      if (session.closedBy !== userId || JSON.stringify(Object.entries(session.closingDenominations ?? {}).sort()) !== JSON.stringify(Object.entries(denominations).sort())) throw new Error('cash_close_conflict');
+      return { ...session };
+    }
+    const closedAt = new Date().toISOString();
+    // This method shares the adapter's mutation queue with every receipt/movement.
+    const transactions = this.data.transactions.filter(t => t.status !== 'deleted' && (t.cashSessionId ? t.cashSessionId === sessionId : Date.parse(t.created_at ?? '') >= Date.parse(session.openedAt) && Date.parse(t.created_at ?? '') <= Date.parse(closedAt)));
+    const expectedCash = Math.round(transactions.reduce((sum, t) => sum + (['payment','manual_income'].includes(t.type) ? t.amount : ['change','manual_expense','manual_investment','refund','voucher_payout'].includes(t.type) ? -t.amount : 0), session.openingAmount) * 100) / 100;
+    const countedCash = totalDenominations(denominations);
+    const report = buildOperationalReport({ orders: this.data.orders, transactions: this.data.transactions, movements: this.data.inventoryMovements, purchases: this.data.purchases, waste: this.data.wasteRecords, cashSessionId: sessionId, start: Date.parse(session.openedAt), end: Date.parse(closedAt) });
+    Object.assign(session, { closedAt, closedBy: userId, expectedCash, countedCash, difference: Math.round((countedCash - expectedCash) * 100) / 100, closingDenominations: { ...denominations } });
+    this.data.dailyClosures.push({ id: sessionId, closed_at: closedAt, total_sales: report.revenue, total_income: report.otherIncome, total_costs: report.costOfGoodsSold + report.operatingExpenses + report.wasteCost, net_profit: report.operatingResult, cash_start: session.openingAmount, cash_end: countedCash, products_sold: Object.fromEntries(report.products.map(p => [p.product,p.quantity])), notes, period_start: session.openedAt, period_end: closedAt, cash_sales: report.cashSales, card_sales: report.cardSales, refunds: report.refunds, discounts: report.discounts, cost_of_goods: report.costOfGoodsSold, expenses: report.operatingExpenses, gross_margin: report.grossMargin, operating_result: report.operatingResult, expected_cash: expectedCash, counted_cash: countedCash, difference: session.difference, tickets: report.tickets, closed_by: userId });
+    this.data.cashRegister = { ...denominations };
+    await this.save(); return { ...session };
+  }
   async getCashSessions(): Promise<DbCashSession[]> { await this.read(); return [...this.data.cashSessions].sort((a, b) => b.openedAt.localeCompare(a.openedAt)); }
   async getOpenCashSession(): Promise<DbCashSession | undefined> { await this.read(); return this.data.cashSessions.find((session) => !session.closedAt); }
   async openCashSession(session: DbCashSession): Promise<boolean> {

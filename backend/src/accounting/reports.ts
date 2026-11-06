@@ -7,10 +7,13 @@ interface ReportInput {
   movements: DbInventoryMovement[];
   purchases: DbPurchase[];
   waste: DbWasteRecord[];
+  cashSessionId?: string;
   start?: number;
   end?: number;
 }
 
+const paymentDate = (order: DbOrder) => order.paidAt ?? order.inventoryAppliedAt ?? order.createdAt;
+const refundDate = (order: DbOrder) => order.refundedAt ?? order.updatedAt;
 const paidStatuses = new Set(['PAID', 'IN_PREPARATION', 'READY', 'COMPLETED', 'paid', 'preparing', 'ready', 'completed']);
 const inRange = (timestamp: string | undefined, start?: number, end?: number) => {
   if (!timestamp) return false;
@@ -19,9 +22,9 @@ const inRange = (timestamp: string | undefined, start?: number, end?: number) =>
 };
 
 export function buildOperationalReport(input: ReportInput) {
-  const allPaidOrders = input.orders.filter((order) => (paidStatuses.has(order.status) || order.status === 'REFUNDED' || order.paymentStatus === 'REFUNDED') && inRange(order.createdAt, input.start, input.end));
-  const refundedOrders = allPaidOrders.filter((order) => order.status === 'REFUNDED' || order.paymentStatus === 'REFUNDED');
-  const orders = allPaidOrders.filter((order) => order.status !== 'REFUNDED' && order.paymentStatus !== 'REFUNDED');
+  const allPaidOrders = input.orders.filter((order) => (paidStatuses.has(order.status) || order.status === 'REFUNDED' || order.paymentStatus === 'REFUNDED') && (input.cashSessionId && order.paidCashSessionId ? order.paidCashSessionId === input.cashSessionId : inRange(paymentDate(order), input.start, input.end)));
+  const refundedOrders = input.orders.filter(order => (order.status === 'REFUNDED' || order.paymentStatus === 'REFUNDED') && inRange(refundDate(order), input.start, input.end));
+  const orders = allPaidOrders;
   const transactions = input.transactions.filter((entry) => entry.status !== 'deleted' && inRange(entry.created_at, input.start, input.end));
   const movements = input.movements.filter((entry) => inRange(entry.createdAt, input.start, input.end));
   const purchases = input.purchases.filter((entry) => inRange(entry.purchasedAt, input.start, input.end));
@@ -38,7 +41,7 @@ export function buildOperationalReport(input: ReportInput) {
     voucherSettled += voucherPart;
     if (order.paymentMethod === 'cash') cashSales += order.total - voucherPart;
     else cardSales += order.total - voucherPart;
-    const hour = new Date(order.createdAt).getHours();
+    const hour = new Date(paymentDate(order)).getHours();
     byHour[hour].tickets += 1;
     byHour[hour].revenue = toMoney(byHour[hour].revenue + order.total);
     for (const item of order.items) {
@@ -51,6 +54,11 @@ export function buildOperationalReport(input: ReportInput) {
     }
   }
 
+  for (const order of refundedOrders) {
+    if (order.paymentMethod === 'cash') cashSales -= order.total - Number(order.voucherAmount || 0);
+    else cardSales -= order.total - Number(order.voucherAmount || 0);
+    voucherSettled -= Number(order.voucherAmount || 0);
+  }
   const grossSales = toMoney(allPaidOrders.reduce((sum, order) => sum + order.total, 0));
   const refunds = toMoney(refundedOrders.reduce((sum, order) => sum + order.total, 0));
   const discounts = toMoney(allPaidOrders.reduce((sum, order) => sum + Number(order.discount || 0), 0));
@@ -75,6 +83,8 @@ export function buildOperationalReport(input: ReportInput) {
 
   return {
     revenue,
+    // Legacy rows are estimated in historical reports only; no history is rewritten.
+    estimatedPaymentDates: allPaidOrders.filter(order => !order.paidAt && !order.inventoryAppliedAt).length,
     grossSales,
     refunds,
     discounts,
@@ -101,7 +111,7 @@ export function buildOperationalReport(input: ReportInput) {
 export function salesCsv(orders: DbOrder[]): string {
   const rows = [['folio', 'fecha', 'cliente', 'método', 'estado', 'total']];
   for (const order of orders.filter((entry) => paidStatuses.has(entry.status))) {
-    rows.push([order.folio || order.id, order.createdAt, order.customerName, order.paymentMethod, order.status, order.total.toFixed(2)]);
+    rows.push([order.folio || order.id, paymentDate(order), order.customerName, order.paymentMethod, order.status, order.total.toFixed(2)]);
   }
   return rows.map((row) => row.map(csvCell).join(',')).join('\n');
 }

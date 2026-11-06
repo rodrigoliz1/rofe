@@ -22,7 +22,7 @@ test('dedicated Barista receives concurrent orders, alerts once, collects cash a
   expect((await request.get(`${API}/api/admin/raw-inventory`, { headers: barista })).status()).toBe(403);
   for (const headers of [admin, barista]) expect((await request.get(`${API}/api/barista/session`, { headers })).status()).toBe(200);
   const current = await (await request.get(`${API}/api/admin/cash/session`, { headers: admin })).json();
-  if (current.current) await request.post(`${API}/api/admin/cash/session/close`, { headers: admin, data: { denominations: await (await request.get(`${API}/api/admin/cash`, { headers: admin })).json() } });
+  if (current.current) await request.post(`${API}/api/admin/cash/session/close`, { headers: admin, data: { sessionId: (await (await request.get('http://127.0.0.1:3100/api/admin/cash/session', { headers: admin })).json()).current.id, denominations: await (await request.get(`${API}/api/admin/cash`, { headers: admin })).json() } });
   expect((await request.post(`${API}/api/admin/cash/session/open`, { headers: admin, data: { operationId: crypto.randomUUID(), denominations: { bill_20: 20, coin_5: 20, coin_2: 20, coin_1: 20 } } })).status()).toBe(201);
   await page.goto('/barista'); await expect(page.getByRole('heading', { name: 'Inicia tu turno' })).toBeVisible(); await page.screenshot({ path: 'docs/evidence/barista-login.png' });
   const soundHashes: string[] = [];
@@ -88,7 +88,7 @@ test('dedicated Barista receives concurrent orders, alerts once, collects cash a
   await page.getByRole('button', { name: 'Cupones', exact: true }).click(); await expect(page.getByRole('button', { name: 'Escanear QR' })).toBeVisible();
   const other = await browser.newContext(); const tablet = await other.newPage(); await staffLogin(tablet); await expect(tablet.locator('.barista-order-card', { hasText: 'M10 Dos' })).toBeVisible(); await other.close();
   for (const id of created.filter(id => id !== one.id)) expect((await request.post(`${API}/api/orders/${id}/cancel-insufficient-change`, { headers: barista })).status()).toBe(200);
-  await request.post(`${API}/api/admin/cash/session/close`, { headers: admin, data: { denominations: await (await request.get(`${API}/api/admin/cash`, { headers: admin })).json() } });
+  await request.post(`${API}/api/admin/cash/session/close`, { headers: admin, data: { sessionId: (await (await request.get('http://127.0.0.1:3100/api/admin/cash/session', { headers: admin })).json()).current.id, denominations: await (await request.get(`${API}/api/admin/cash`, { headers: admin })).json() } });
 });
 
 test('Barista opens the camera only on demand and stops it when leaving the scanner', async () => {

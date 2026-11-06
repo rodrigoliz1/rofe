@@ -10,6 +10,8 @@ import type { DbOrder } from './db';
 import { registerCatalogRoutes } from './routes/catalog';
 import { registerPickupRoutes, refreshPickupOrder, cancelPickupOrder } from './routes/pickup';
 import { StripePickupService } from './payments/stripePickup';
+import { registerPointReconciliationRoutes } from './routes/pointReconciliation';
+import { recoverPointReference } from './payments/pointReconciliation';
 import { reconcilePointOrder, sendOrderToPoint } from './payments/orderPayments';
 import { getEnv } from './config/env';
 import { createSecurityStore } from './auth/store';
@@ -785,7 +787,10 @@ app.post('/api/webhooks/mercadopago', async (req, res, next) => {
     });
     if (!signatureValid || !dataId) throw new AppError(401, 'INVALID_WEBHOOK_SIGNATURE', 'Firma de webhook inválida.');
 
-    const { order, changed } = await reconcilePointOrder(db, await mercadoPago.getOrder(dataId));
+    const provider = await mercadoPago.getOrder(dataId);
+    const referenced = await db.getOrderById(provider.external_reference);
+    if (referenced && !referenced.paymentIntentId) await recoverPointReference(db, provider);
+    const { order, changed } = await reconcilePointOrder(db, provider);
     if (changed) {
       await auditSensitive(req, { action: 'PAYMENT_RECONCILED', entity: 'ORDER', entityId: order.id, after: { status: order.status, paymentStatus: order.paymentStatus } });
       broadcast({ type: order.paymentStatus === 'APPROVED' ? 'order_paid' : 'order_updated', orderId: order.id, order });
@@ -916,11 +921,11 @@ app.post('/api/vouchers/:code/redeem-cash', voucherLimiter, requireAuth, require
 });
 
 // Administrative history and liability summary.
-async function voucherLedger(since?: number) {
+async function voucherLedger(since?: number, until?: number) {
   if (!await db.vouchersAvailable()) return undefined;
   const vouchers = await db.listChangeVouchers();
   const orders = new Map((await db.getOrders()).map((order) => [order.id, order]));
-  const inWindow = (timestamp: string) => since === undefined || Date.parse(timestamp) >= since;
+  const inWindow = (timestamp: string) => (since === undefined || Date.parse(timestamp) >= since) && (until === undefined || Date.parse(timestamp) <= until);
   const redemptions = vouchers.flatMap((voucher) => voucher.redemptions);
   const reserved = redemptions.filter((entry) => entry.kind === 'ORDER' && entry.status === 'APPLIED' && orders.get(entry.orderId ?? '')?.status === 'PENDING_PAYMENT');
   return {
@@ -982,6 +987,11 @@ app.post('/api/orders/discount-authorization', authLimiter, requireAuth, require
 
 // --- Admin Endpoints ---
 app.use('/api/admin', requireAuth, requireRole('ADMIN', 'MANAGER'));
+
+registerPointReconciliationRoutes(app, db, mercadoPago, env, async (req, order) => {
+  await auditSensitive(req, { action: 'PAYMENT_RECOVERY_CHECKED', entity: 'ORDER', entityId: order.id, after: { status: order.status, paymentStatus: order.paymentStatus } });
+  broadcast({ type: 'order_updated', orderId: order.id, order });
+});
 
 app.get('/api/admin/terminal', async (_req, res) => {
   res.json({ configured: mercadoPago.isConfigured(), webhookConfigured: Boolean(env.MERCADO_PAGO_WEBHOOK_SECRET), simulation: env.NODE_ENV !== 'production' && env.ENABLE_PAYMENT_SIMULATION, terminalId: env.POINT_DEVICE_ID ?? null });
@@ -1064,7 +1074,7 @@ app.get('/api/admin/metrics', async (req, res, next) => {
     const week = buildOperationalReport({ ...source, start: weekStartDate.getTime(), end: now.getTime() });
     const month = buildOperationalReport({ ...source, start: monthStart, end: now.getTime() });
     const cashInRegister = totalDenominations(register);
-    const expectedCash = cashSession ? await expectedCashForSession(cashSession.openedAt, cashSession.openingAmount) : 0;
+    const expectedCash = cashSession ? await expectedCashForSession(cashSession.openedAt, cashSession.openingAmount, cashSession.id) : 0;
     res.json({
       revenue: selected.revenue, costs: toMoney(selected.costOfGoodsSold + selected.operatingExpenses + selected.wasteCost),
       profit: selected.operatingResult, cashInRegister, transactionsCount: transactions.length,
@@ -1119,7 +1129,7 @@ app.get('/api/admin/cash/session', async (_req, res, next) => {
     const current = await db.getOpenCashSession();
     // expectedCash is physical cash only. Vouchers are shown apart: issued vouchers are cash
     // that stays in the drawer but is owed to customers (a liability), payouts leave the drawer.
-    res.json({ current: current ? { ...current, expectedCash: await expectedCashForSession(current.openedAt, current.openingAmount), vouchers: (await voucherLedger(Date.parse(current.openedAt)))?.summary } : undefined, history: await db.getCashSessions() });
+    res.json({ current: current ? { ...current, expectedCash: await expectedCashForSession(current.openedAt, current.openingAmount, current.id), vouchers: (await voucherLedger(Date.parse(current.openedAt)))?.summary } : undefined, history: await db.getCashSessions() });
   } catch (error) { next(error); }
 });
 
@@ -1148,8 +1158,8 @@ app.post('/api/admin/cash/session/open', async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-async function expectedCashForSession(openedAt: string, openingAmount: number): Promise<number> {
-  const entries = (await db.getTransactionLedger()).filter((entry) => entry.created_at && new Date(entry.created_at).getTime() >= new Date(openedAt).getTime() && entry.status !== 'deleted');
+async function expectedCashForSession(openedAt: string, openingAmount: number, sessionId: string): Promise<number> {
+  const entries = (await db.getTransactionLedger()).filter((entry) => (entry.cashSessionId ? entry.cashSessionId === sessionId : entry.created_at && new Date(entry.created_at).getTime() >= new Date(openedAt).getTime()) && entry.status !== 'deleted');
   return toMoney(entries.reduce((total, entry) => {
     if (entry.type === 'payment' || entry.type === 'manual_income') return total + entry.amount;
     if (entry.type === 'change' || entry.type === 'manual_expense' || entry.type === 'manual_investment' || entry.type === 'refund' || entry.type === 'voucher_payout') return total - entry.amount;
@@ -1159,31 +1169,13 @@ async function expectedCashForSession(openedAt: string, openingAmount: number): 
 
 app.post('/api/admin/cash/session/close', async (req, res, next) => {
   try {
-    const { denominations, notes } = z.object({ denominations: z.record(z.string(), z.number().int().min(0)), notes: z.string().trim().max(500).optional() }).parse(req.body);
-    const session = await db.getOpenCashSession();
-    if (!session) throw new AppError(409, 'CASH_SESSION_REQUIRED', 'No hay una sesión de caja abierta.');
-    const expectedCash = await expectedCashForSession(session.openedAt, session.openingAmount);
-    const countedCash = totalDenominations(denominations);
-    const close = { expectedCash, countedCash, difference: toMoney(countedCash - expectedCash), closingDenominations: denominations, closedBy: req.principal!.subjectId, closedAt: new Date().toISOString() };
-    const stats = await calculateClosureStats();
-    const report = buildOperationalReport({
-      orders: await db.getOrders(), transactions: await db.getTransactionLedger(), movements: await db.getInventoryMovements(),
-      purchases: await db.getPurchases(), waste: await db.getWasteRecords(), start: new Date(session.openedAt).getTime(), end: new Date(close.closedAt).getTime(),
-    });
-    const closure = {
-      id: randomUUID(), closed_at: close.closedAt, total_sales: report.revenue, total_income: report.otherIncome,
-      total_costs: toMoney(report.costOfGoodsSold + report.operatingExpenses + report.wasteCost), net_profit: report.operatingResult,
-      cash_start: session.openingAmount, cash_end: countedCash, products_sold: stats.products_sold, notes,
-      period_start: session.openedAt, period_end: close.closedAt, cash_sales: report.cashSales, card_sales: report.cardSales,
-      refunds: report.refunds, discounts: report.discounts, cost_of_goods: report.costOfGoodsSold, expenses: report.operatingExpenses,
-      gross_margin: report.grossMargin, operating_result: report.operatingResult, expected_cash: expectedCash,
-      counted_cash: countedCash, difference: close.difference, tickets: report.tickets, closed_by: req.principal!.subjectId,
-    };
-    const closed = await db.closeCashSessionWithClosing(session.id, close, closure);
-    if (!closed) throw new AppError(409, 'CASH_SESSION_ALREADY_CLOSED', 'La sesión de caja ya estaba cerrada.');
-    await auditSensitive(req, { action: 'CASH_CLOSE', entity: 'CASH_SESSION', entityId: session.id, before: session, after: close });
+    const { sessionId, denominations, notes } = z.object({ sessionId: z.string().uuid(), denominations: z.record(z.string(), z.number().int().min(0)), notes: z.string().trim().max(500).optional() }).parse(req.body);
+    totalDenominations(denominations);
+    // Pin retries to the requested shift, never whichever shift happens to be open.
+    const session = await db.closeCashSessionConsistently(sessionId, denominations, req.principal!.subjectId, notes);
+    await auditSensitive(req, { action: 'CASH_CLOSE', entity: 'CASH_SESSION', entityId: session.id, after: session });
     broadcast({ type: 'cash_updated' });
-    res.json({ ...session, ...close, vouchers: (await voucherLedger(Date.parse(session.openedAt)))?.summary });
+    res.json({ ...session, vouchers: (await voucherLedger(Date.parse(session.openedAt), Date.parse(session.closedAt!)))?.summary });
   } catch (error) { next(error); }
 });
 

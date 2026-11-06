@@ -14,7 +14,7 @@ export class ConnectionError extends Error {
   constructor() { super('No pudimos conectar con ROFÉ. Revisa la conexión e intenta de nuevo.'); }
 }
 export function apiUrl(path: string): string {
-  const base = import.meta.env.VITE_API_URL || window.location.origin;
+  const base = import.meta.env.VITE_BACKEND_DISABLED ? window.location.origin : import.meta.env.VITE_API_URL || window.location.origin;
   return `${base.replace(/\/$/, '')}${path}`;
 }
 export function getPrincipal(): Principal | undefined { return principal; }

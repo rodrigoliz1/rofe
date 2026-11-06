@@ -68,7 +68,7 @@ do $$ begin
   if confirm_order_payment('pg-qr-sale', 'pi_pg_test', '[{"ingredientId":"coffee_beans","quantity":18}]') then raise exception 'QR payment replay duplicated'; end if;
   if exists(select 1 from inventory_reservations where order_id = 'pg-qr-sale') then raise exception 'QR inventory reservation not released'; end if;
   if (select count(*) from cash_transactions where description like '%Q-PG-QR%') <> 1 then raise exception 'QR ledger duplicated'; end if;
-  if rofe_schema_version() <> 9 then raise exception 'voucher ledger migration missing'; end if;
+  if rofe_schema_version() < 9 then raise exception 'voucher ledger migration missing'; end if;
 end $$;
 insert into pickup_settings values (1, '{"enabled":false,"locationName":"ROFÉ"}');
 -- Change vouchers: cash payment with insufficient change issues one voucher; payout and order use are exactly-once.

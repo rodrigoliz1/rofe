@@ -8,6 +8,7 @@ export default defineConfig({
       NODE_ENV: 'test',
       // Never inherit live integrations from backend/.env or the invoking shell.
       SUPABASE_URL: '', SUPABASE_SERVICE_KEY: '',
+      POINT_RECONCILIATION_ENABLED: 'false', CRON_SECRET: '',
       MERCADO_PAGO_ACCESS_TOKEN: '', MERCADO_PAGO_WEBHOOK_SECRET: '', POINT_DEVICE_ID: '',
       STRIPE_SECRET_KEY: '', STRIPE_WEBHOOK_SECRET: '', PUBLIC_ORDERING_URL: '',
       VERCEL: '',
