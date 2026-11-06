@@ -84,6 +84,28 @@ export class MercadoPagoService {
     throw new AppError(409, 'TERMINAL_NOT_LINKED', 'La terminal configurada no pertenece a esta cuenta de Mercado Pago.');
   }
 
+  /** Operator-only utility: no HTTP route exposes terminal configuration. */
+  async setTerminalMode(mode: 'PDV' | 'SELF_SERVICE', expectedMode: 'PDV' | 'SELF_SERVICE'): Promise<{ terminalId: string; previousMode: string; operatingMode: string; changed: boolean; requestedMode: 'PDV' | 'SELF_SERVICE'; transitionPending: boolean; providerStatus?: number }> {
+    if (!['PDV', 'SELF_SERVICE'].includes(mode) || !['PDV', 'SELF_SERVICE'].includes(expectedMode)) throw new AppError(400, 'TERMINAL_MODE_INVALID', 'Elige PDV o SELF_SERVICE.');
+    const before = await this.checkTerminal();
+    if (before.operatingMode === mode) return { ...before, previousMode: before.operatingMode, requestedMode: mode, changed: false, transitionPending: false };
+    if (before.operatingMode !== expectedMode) throw new AppError(409, 'TERMINAL_MODE_CHANGED', 'El modo actual cambió. Consulta la terminal antes de continuar.');
+    // Send only the configured terminal and its mode: never reassign store/POS/credentials.
+    const response = await fetch('https://api.mercadopago.com/terminals/v1/setup', {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${this.env.MERCADO_PAGO_ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ terminals: [{ id: before.terminalId, operating_mode: mode }] }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const payload = await response.json().catch(() => undefined) as { terminals?: Array<{ id: string; operating_mode: string }> } | undefined;
+    if (response.status !== 200 || payload?.terminals?.length !== 1 || payload.terminals[0].id !== before.terminalId || payload.terminals[0].operating_mode !== mode) {
+      throw new AppError(502, 'TERMINAL_SETUP_UNCONFIRMED', 'Mercado Pago no confirmó el cambio. Consulta el modo actual antes de reintentar.');
+    }
+    const after = await this.checkTerminal();
+    // The list can lag a successful setup. Report that state; never repeat PATCH.
+    return { ...after, previousMode: before.operatingMode, requestedMode: mode, changed: true, transitionPending: after.operatingMode !== mode, providerStatus: response.status };
+  }
+
   async refundOrder(orderId: string, idempotencyKey: string): Promise<void> {
     await this.lifecycleRequest(orderId, 'refund', idempotencyKey, ['refunded']);
   }

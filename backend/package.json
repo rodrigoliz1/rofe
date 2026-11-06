@@ -13,7 +13,8 @@
     "test:coverage": "vitest run --coverage",
     "test:db": "bash scripts/test-migrations.sh",
     "check:production": "tsx scripts/check-production.ts",
-    "check:pickup": "tsx scripts/check-pickup.ts"
+    "check:pickup": "tsx scripts/check-pickup.ts",
+    "point:mode": "tsx scripts/point-mode.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.1",

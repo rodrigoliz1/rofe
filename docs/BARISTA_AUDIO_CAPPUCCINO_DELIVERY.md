@@ -56,3 +56,12 @@ El shell Android release carga ROFÉ por HTTPS; estos cambios web no requieren
 reinstalar las APK ni borrar datos. Recargar la app después del despliegue y
 comprobar «Sonido activo» al iniciar turno. El volumen multimedia de la M10 y
 la prueba audible con un pedido normal autorizado se validan físicamente.
+
+## Corrección adicional de encuadre en POS y QR
+
+La comprobación visual de producción encontró que el modal compartido solo tenía
+límites de foto bajo `.kiosk-shell`; POS y QR podían dibujar la imagen a sus 960 px
+intrínsecos. Se añadieron límites compartidos, `object-fit: contain` y un cuerpo
+flexible con `min-height: 0`. El producto queda completo y el botón sigue accesible.
+Las reglas específicas del kiosco conservan su encuadre. Regresión en POS, QR
+escritorio y QR móvil; capturas `docs/evidence/product-photo-*.png`.

@@ -83,11 +83,28 @@
 
 .modal-body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 1.8rem 2rem;
   display: flex;
   flex-direction: column;
   gap: 1.8rem;
+}
+
+/* Shared photo bounds for POS and QR; the kiosk keeps its scoped 16:9 layout. */
+.modal-photo {
+  aspect-ratio: 4 / 3;
+  max-height: 30dvh;
+  flex-shrink: 0;
+  overflow: hidden;
+  background: #e8d2b9;
+}
+
+.modal-photo img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .customization-section {
