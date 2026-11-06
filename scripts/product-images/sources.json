@@ -96,6 +96,14 @@
       "prompt": "Exactly one single soft-baked chocolate chip cookie on an ivory ceramic plate, golden edges and dark chocolate chunks. No stack, no additional food.",
       "note": "",
       "approvedAt": "2026-11-05T18:25:59+00:00"
+    },
+    "1781621332807": {
+      "name": "Capuccino",
+      "status": "approved",
+      "prompt": "A hot cappuccino in a rounded ivory ceramic cup and matching saucer, velvety milk foam with a delicate natural dusting of cinnamon and a slim caramel espresso border; no latte-art rosetta, no whipped cream, right-side handle, three-quarter view, no additional props.",
+      "approvedAt": "2026-11-05T21:21:30+00:00",
+      "source": "scripts/product-images/originals/1781621332807.png",
+      "note": ""
     }
   },
   "output": {

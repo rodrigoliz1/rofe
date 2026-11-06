@@ -365,7 +365,16 @@ test('every product shows its own photo or the brand illustration — never a wr
   expect(failed).toEqual([]);
 });
 
-test('the production catalog rows (/espresso.png, Unsplash URLs, 12 products) never produce a 404 or an external request', async ({ page }) => {
+test('the production catalog rows (/espresso.png, Unsplash URLs, 13 products) never produce a 404 or an external request', async ({ page, request }) => {
+  // Image fixture uses a real temporary product/quote. It copies the existing test
+  // latte recipe; no production data or administrative recipe quantities are changed.
+  const api = 'http://127.0.0.1:3100';
+  const login = await request.post(`${api}/api/auth/login`, { data: { email: 'admin@rofe.test', password: 'TestAdmin123!' } });
+  const headers = { Authorization: `Bearer ${(await login.json()).accessToken}` };
+  const baseProducts = await (await request.get(`${api}/api/products`)).json() as Array<Record<string, unknown>>;
+  const template = baseProducts.find(product => product.id === 'latte')!;
+  expect((await request.post(`${api}/api/products`, { headers, data: { ...template, id: '1781621332807', name: 'Capuccino', description: 'Espresso con leche cremada y espuma con canela.', price: 49, customizable: false, custom_variants: [], image: 'https://images.unsplash.com/old-cappuccino' } })).status()).toBe(201);
+  try {
   const requested: string[] = [];
   page.on('request', (request) => { if (request.resourceType() === 'image') requested.push(request.url()); });
   // Exactly what the production database returns (seeded by an older app version).
@@ -374,22 +383,38 @@ test('the production catalog rows (/espresso.png, Unsplash URLs, 12 products) ne
     const products = await response.json() as Array<Record<string, unknown>>;
     const legacy: Record<string, string> = { espresso: '/espresso.png', latte: 'https://images.unsplash.com/photo-1541167760496-1628856ab772?w=600', 'croissant-mantequilla': 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?w=600' };
     const extra = [
+      { id: '1781621332807', name: 'Capuccino', image: 'https://images.unsplash.com/old-cappuccino', category: 'coffee' },
       { id: 'double-espresso', name: 'Double Espresso', image: '/espresso.png', category: 'coffee' },
       { id: 'flat-white', name: 'Flat White', image: 'https://images.unsplash.com/photo-1577968897966-3d4325b36b61?w=600', category: 'coffee' },
       { id: 'iced-matcha-latte', name: 'Iced Matcha Latte', image: '/matcha-frio.jpg', category: 'cold' },
       { id: 'pain-au-chocolat', name: 'Pain au Chocolat', image: '/pan-chocolate.jpg', category: 'bakery' },
-    ].map((row) => ({ ...products[0], ...row, description: row.name, price: 50, customizable: false, stock: 10 }));
+    ].filter(row => !products.some(product => product.id === row.id)).map((row) => ({ ...products[0], ...row, description: row.name, price: 50, customizable: false, stock: 10 }));
     await route.fulfill({ response, json: [...products.map((product) => ({ ...product, image: legacy[product.id as string] ?? product.image })), ...extra] });
   });
   await authorize(page, 'M10 catálogo producción');
+  await page.waitForFunction(() => window.__rofeKioskPreload?.total === 13);
+  expect(requested.some(url => /1781621332807-/.test(url))).toBe(true);
   await start(page);
-  await expect(page.locator('.kiosk-catalog .product-card')).toHaveCount(12);
+  await expect(page.locator('.kiosk-catalog .product-card')).toHaveCount(13);
   await page.locator('.kiosk-catalog .products-grid').evaluate((grid) => grid.scrollTo({ top: grid.scrollHeight }));
   await page.waitForTimeout(500);
   expect(requested.filter((url) => /espresso\.png|unsplash|matcha-frio\.jpg|pan-chocolate\.jpg/.test(url))).toEqual([]);
   expect(requested.every((url) => new URL(url).origin === 'http://127.0.0.1:4173')).toBe(true);
+  const cappuccino = page.locator('.kiosk-catalog .product-card', { hasText: 'Capuccino' });
+  await expect(cappuccino.locator('img')).toHaveAttribute('src', /1781621332807-.*\.webp/);
+  await page.screenshot({ path: `docs/evidence/catalog-13-${test.info().project.name.replace(/ /g, '-').toLowerCase()}.png` });
+  await cappuccino.click();
+  await expect(page.getByRole('button', { name: /Agregar a la Orden/ })).toBeEnabled();
+  await page.locator('.modal-backdrop').evaluate(async element => { await Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => {}))); await Promise.all([...element.querySelectorAll('img')].map(image => image.decode())); });
+  await expect(page.getByRole('dialog').locator('img')).toHaveAttribute('src', /1781621332807-960\..*\.webp/);
+  await page.screenshot({ path: `docs/evidence/cappuccino-${test.info().project.name.replace(/ /g, '-').toLowerCase()}.png` });
   const pending = await page.locator('.kiosk-catalog [data-photo="pending"]').count();
-  expect(pending).toBe(0); // The new collection now covers all twelve products.
+  expect(pending).toBe(0); // The new collection now covers all thirteen products.
+  } finally {
+    await page.unrouteAll({ behavior: 'wait' });
+    await page.close(); // Stop inventory subscriptions before deleting the temporary fixture.
+    expect((await request.delete(`${api}/api/products/1781621332807`, { headers })).status()).toBe(200);
+  }
 });
 
 test('a photo that fails to load falls back to the brand illustration', async ({ page }) => {

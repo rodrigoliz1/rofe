@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 const API = 'http://127.0.0.1:3100';
 const auth = async (request: APIRequestContext, email: string, password: string) => ({ Authorization: `Bearer ${(await (await request.post(`${API}/api/auth/login`, { data: { email, password } })).json()).accessToken}` });
@@ -23,7 +25,23 @@ test('dedicated Barista receives concurrent orders, alerts once, collects cash a
   if (current.current) await request.post(`${API}/api/admin/cash/session/close`, { headers: admin, data: { denominations: await (await request.get(`${API}/api/admin/cash`, { headers: admin })).json() } });
   expect((await request.post(`${API}/api/admin/cash/session/open`, { headers: admin, data: { operationId: crypto.randomUUID(), denominations: { bill_20: 20, coin_5: 20, coin_2: 20, coin_1: 20 } } })).status()).toBe(201);
   await page.goto('/barista'); await expect(page.getByRole('heading', { name: 'Inicia tu turno' })).toBeVisible(); await page.screenshot({ path: 'docs/evidence/barista-login.png' });
+  const soundHashes: string[] = [];
+  page.on('response', async response => {
+    if (response.url().includes('nuevo_pedido') && response.status() === 200) soundHashes.push(createHash('sha256').update(await response.body()).digest('hex'));
+  });
+  await page.addInitScript(() => {
+    const state = window as Window & { baristaAudioDurations: number[] };
+    state.baristaAudioDurations = [];
+    const original = AudioBufferSourceNode.prototype.start;
+    AudioBufferSourceNode.prototype.start = function (...args: Parameters<typeof original>) {
+      state.baristaAudioDurations.push(this.buffer?.duration ?? 0);
+      return original.apply(this, args);
+    };
+  });
   await staffLogin(page);
+  await expect(page.getByRole('button', { name: 'Sonido activo', exact: true })).toBeVisible();
+  await expect.poll(() => soundHashes.length).toBe(1);
+  expect(soundHashes[0]).toBe(createHash('sha256').update(readFileSync('src/assets/audio/nuevo_pedido.mp3')).digest('hex'));
   await page.evaluate(() => { (window as unknown as { alertIds: string[] }).alertIds = []; window.addEventListener('rofe:barista-alert', event => { (window as unknown as { alertIds: string[] }).alertIds.push(...(event as CustomEvent<{ orderIds: string[] }>).detail.orderIds); }); });
   const created: string[] = [];
   const create = async (name: string, source: 'KIOSK' | 'POS' = 'KIOSK') => {
@@ -37,6 +55,10 @@ test('dedicated Barista receives concurrent orders, alerts once, collects cash a
   const [one, two] = await Promise.all([create('M10 Uno'), create('M10 Dos', 'POS')]);
   for (const name of ['M10 Uno', 'M10 Dos']) await expect(page.locator('.barista-order-card', { hasText: name })).toBeVisible();
   await expect.poll(() => page.evaluate(ids => (window as unknown as { alertIds: string[] }).alertIds.filter(id => ids.includes(id)).length, [one.id, two.id])).toBe(2);
+  const playedDurations = await page.evaluate(() => (window as Window & { baristaAudioDurations: number[] }).baristaAudioDurations);
+  expect(playedDurations.length).toBeGreaterThanOrEqual(1);
+  expect(playedDurations.length).toBeLessThanOrEqual(2); // A simultaneous snapshot may group two arrivals.
+  expect(playedDurations.every(duration => duration > 1 && duration < 2)).toBe(true);
   await page.screenshot({ path: 'docs/evidence/barista-tablet-queue.png' });
   const card = () => page.locator('.barista-order-card', { hasText: 'M10 Uno' });
   await expect(card()).toContainText('Kiosco');

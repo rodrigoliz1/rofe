@@ -301,6 +301,31 @@
           "bytes": 88302
         }
       }
+    },
+    "1781621332807": {
+      "name": "Capuccino",
+      "status": "approved",
+      "prompt": "A hot cappuccino in a rounded ivory ceramic cup and matching saucer, velvety milk foam with a delicate natural dusting of cinnamon and a slim caramel espresso border; no latte-art rosetta, no whipped cream, right-side handle, three-quarter view, no additional props.",
+      "note": "",
+      "approvedAt": "2026-11-05T21:21:30+00:00",
+      "source": "scripts/product-images/originals/1781621332807.png",
+      "sourceSize": "1254x1254",
+      "card": {
+        "384": {
+          "url": "/products/1781621332807-384.e2f4d7441e.webp",
+          "bytes": 12922
+        },
+        "640": {
+          "url": "/products/1781621332807-640.8a37a5553e.webp",
+          "bytes": 32870
+        }
+      },
+      "detail": {
+        "960": {
+          "url": "/products/1781621332807-960.307f42db18.webp",
+          "bytes": 68950
+        }
+      }
     }
   }
 }

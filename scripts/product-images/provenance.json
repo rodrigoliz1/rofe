@@ -98,6 +98,16 @@
       "tool": "image_gen.imagegen",
       "generated": true,
       "subject": "A single golden pain au chocolat with crisp laminated layers, two dark chocolate batons visible at the ends, on a small cream ceramic plate, nothing else on the surface."
+    },
+    {
+      "productId": "1781621332807",
+      "file": "1781621332807.png",
+      "sha256": "2c4f56f4907005745f83b0b305855ce1bcf956d01c9102a87c7eb5250d3260d4",
+      "tool": "image_gen.imagegen",
+      "generated": true,
+      "subject": "A hot cappuccino in a rounded ivory ceramic cup and matching saucer, velvety milk foam with a delicate natural dusting of cinnamon and a slim caramel espresso border; no latte-art rosetta, no whipped cream, right-side handle, three-quarter view, no additional props.",
+      "note": "Generated as the thirteenth photograph after the production audit found Capuccino missing; uses the existing warm neutral studio direction. No other product image reused.",
+      "generationPrompt": "Use case: product-mockup. Create one original square hyperrealistic premium commercial product photograph for ROFÉ's existing warm neutral espresso bar menu collection. Subject: one authentic hot cappuccino in a rounded ivory/cream ceramic coffee cup with right-side handle on a matching ceramic saucer. Espresso and steamed milk under a generous fine velvety milk foam layer, with a delicate natural even dusting of cinnamon across the foam and a slim caramel coffee border. Clearly a cappuccino, distinct from a latte with rosetta art: no leaf/rosetta drawing, no whipped cream, no mound or dessert topping. Appetizing realistic fine foam bubbles and porcelain reflections. Camera three-quarter view slightly above cup, centered product filling around 65–75 percent of square frame, cup and saucer fully in frame with breathing room. Seamless warm beige/cream background with subtle gradient, matte light warm stone tabletop, soft diffused studio key light from left with gentle fill and grounded soft shadows. Restrained warm caramel/ivory palette, clean photorealistic advertising art direction, same premium studio feeling as an espresso/latte catalog. Only cup, coffee, saucer and a trace of soft steam. No text, logo, watermark, brands, hands, people, spoon, napkin, cinnamon sticks, loose coffee beans or other props. Square 1:1, at least 1024 pixels per side."
     }
   ]
 }
