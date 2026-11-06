@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/point_root"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:fillViewport="true"
+    android:paddingStart="28dp" android:paddingEnd="28dp" android:clipToPadding="false">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:gravity="center_horizontal"
+        android:paddingTop="36dp" android:paddingBottom="24dp">
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="@string/brand" android:fontFamily="@font/bricolage_bold" android:textSize="48sp"
+            android:letterSpacing="-0.04" android:textColor="@color/point_foreground" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="@string/brand_caption" android:textSize="12sp" android:letterSpacing="0.28"
+            android:textColor="@color/point_gold" android:layout_marginTop="2dp" />
+        <!-- Intrinsic height is required for scroll recovery with large fonts / landscape; 0dp clips content. -->
+        <LinearLayout android:id="@+id/status_group" android:layout_width="match_parent" android:layout_height="wrap_content"
+            tools:ignore="InefficientWeight"
+            android:layout_weight="1" android:minHeight="360dp" android:orientation="vertical"
+            android:gravity="center" android:paddingTop="36dp" android:paddingBottom="36dp">
+            <ImageView android:layout_width="80dp" android:layout_height="80dp"
+                android:src="@drawable/payment_mark" android:importantForAccessibility="no" android:contentDescription="@null" />
+            <View android:layout_width="36dp" android:layout_height="1dp" android:background="@color/point_gold"
+                android:layout_marginTop="24dp" android:layout_marginBottom="24dp" android:importantForAccessibility="no" />
+            <TextView android:id="@+id/status_title" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="@string/waiting_title" android:fontFamily="@font/bricolage_bold" android:textSize="32sp"
+                android:gravity="center" android:textColor="@color/point_foreground" android:accessibilityLiveRegion="polite" />
+            <TextView android:id="@+id/status_description" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="14dp" android:text="@string/waiting_description" android:textSize="18sp"
+                android:gravity="center" android:textColor="@color/point_muted" android:lineSpacingExtra="3dp" />
+            <Button android:id="@+id/retry" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginTop="20dp" android:minHeight="52dp" android:text="@string/retry" android:textAllCaps="false"
+                android:textSize="16sp" android:textColor="@color/point_foreground"
+                android:backgroundTint="@color/point_border" android:visibility="gone" />
+        </LinearLayout>
+        <TextView android:id="@+id/network_status" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="@string/network_checking" android:textSize="13sp" android:gravity="center" android:textColor="@color/point_muted" />
+        <TextView android:id="@+id/integration_status" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="12dp" android:text="@string/prototype_notice" android:textSize="12sp"
+            android:gravity="center" android:textColor="@color/point_gold" android:accessibilityLiveRegion="polite" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="12dp" android:text="@string/prototype_disclaimer" android:textSize="12sp"
+            android:gravity="center" android:textColor="@color/point_muted" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="24dp" android:text="@string/point_caption" android:textSize="12sp"
+            android:letterSpacing="0.12" android:gravity="center" android:textColor="@color/point_muted" />
+    </LinearLayout>
+</ScrollView>

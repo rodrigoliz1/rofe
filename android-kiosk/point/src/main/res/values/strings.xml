@@ -1,0 +1,22 @@
+<resources>
+    <string name="app_name">ROFÉ Point</string>
+    <string name="brand">ROFÉ</string>
+    <string name="brand_caption">ESPRESSO BAR</string>
+    <string name="waiting_title">Esperando cobro</string>
+    <string name="waiting_description">Realiza tu pedido en la pantalla de autoservicio.</string>
+    <string name="offline_title">Sin conexión</string>
+    <string name="offline_description">Pide ayuda al personal. La pantalla de espera se recuperará cuando vuelva la conexión.</string>
+    <string name="network_available">Red disponible · según Android</string>
+    <string name="network_offline">Red sin acceso a internet</string>
+    <string name="network_checking">Comprobando conexión…</string>
+    <string name="network_unknown">No pudimos comprobar la conexión</string>
+    <string name="prototype_notice">PROTOTIPO · NO PROCESA COBROS</string>
+    <string name="client_id_required">Integración pendiente de configuración autorizada</string>
+    <string name="homologation_required">Integración pendiente de homologación</string>
+    <string name="unsupported_device">Dispositivo pendiente de compatibilidad</string>
+    <string name="host_unavailable">Integración no disponible · pide ayuda al personal</string>
+    <string name="host_checking">Comprobando integración…</string>
+    <string name="retry">Comprobar de nuevo</string>
+    <string name="point_caption">ROFÉ POINT · AUTOSERVICIO</string>
+    <string name="prototype_disclaimer">Esta versión muestra la interfaz de espera. Los cobros de ROFÉ conservan su integración actual.</string>
+</resources>

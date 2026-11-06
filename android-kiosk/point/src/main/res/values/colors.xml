@@ -1,0 +1,8 @@
+<resources>
+    <!-- Same tokens as src/styles/foundation.css. -->
+    <color name="point_background">#0A0A0C</color>
+    <color name="point_foreground">#F5F0E8</color>
+    <color name="point_muted">#B5AEA4</color>
+    <color name="point_gold">#D4A853</color>
+    <color name="point_border">#35312C</color>
+</resources>
