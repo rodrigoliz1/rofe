@@ -14,7 +14,7 @@ Continuación en la Mac: el diagnóstico y la configuración aislada se conserva
 | `main` | Lo despliega Vercel en producción (`rofe.vercel.app`) |
 | PR #1 (Render → Vercel) | Fusionado por squash (`9454620`). La rama `claude/practical-archimedes-3ibbur` contiene sus commits originales; no hay trabajo perdido |
 | `claude/android-kiosk-m10` | Sin commits fuera de `main` |
-| Migraciones aplicadas en Supabase | **001–008 aplicadas**. Confirmado por el dueño y por consulta GET de solo lectura a `rofe_schema_version()` (8) el 5-nov-2026 |
+| Migraciones aplicadas en Supabase | **001–009 aplicadas**. 009 aplicada por el dueño y confirmada por RPC de solo lectura (9) el 5-nov-2026; apertura posterior observada en producción |
 
 Para continuar en la Mac:
 
@@ -43,7 +43,7 @@ npm run dev
   - `db.ts` define la interfaz `DbAdapter` y su implementación JSON (desarrollo y E2E; serializa todas las operaciones).
   - `supabaseAdapter.ts` es el adaptador de producción: llama a funciones plpgsql atómicas (`FOR UPDATE`).
 - **Despliegue**: Vercel sirve el frontend y la API juntos. `api/index.js` exporta Express como Function; `vercel.json` define rewrites, caché y build. No hay cron: la conciliación se hace con webhooks, polling del cliente y el barrido del SSE. El tiempo real usa SSE con polling a `orders.updated_at` (migración 006).
-- **Base de datos**: Supabase/PostgreSQL. `backend/migrations/001…008` son migraciones versionadas y no destructivas. El backend exige `rofe_schema_version() >= 5`; los cupones necesitan 7 para emitirse y 8 para usarse en pedidos.
+- **Base de datos**: Supabase/PostgreSQL. `backend/migrations/001…009` son migraciones versionadas y no destructivas. El backend exige `rofe_schema_version() >= 5`; los cupones necesitan 7 para emitirse y 8 para usarse en pedidos.
 - **Pagos**:
   - Mercado Pago Point (`backend/src/payments/`): orden idempotente; webhook y consulta comparten la misma conciliación.
   - Stripe para pedidos QR/pickup.
@@ -108,7 +108,7 @@ Documentación completa: `docs/CHANGE_VOUCHERS.md`.
 | `npm run verify` | Lint, tipos, Vitest frontend y backend, y build de ambos |
 | `npm --prefix backend run lint` | ESLint del backend (2 advertencias `any` previas, 0 errores) |
 | `npm run test:e2e` | 75 recorridos Playwright con 3 proyectos: iPad horizontal, M10 horizontal y M10 vertical (`e2e/kiosk-terminal.spec.ts`). Usa una base JSON temporal |
-| `npm --prefix backend run test:db` | PostgreSQL temporal: aplica 001–008, `tests/sql/critical-flows.sql` y `tests/sql/concurrency.sh` (carreras reales con psql en paralelo). Necesita `initdb`, `pg_ctl` y `psql` (en Mac: `brew install postgresql@16`) |
+| `npm --prefix backend run test:db` | PostgreSQL temporal: aplica 001–009, `tests/sql/critical-flows.sql` y `tests/sql/concurrency.sh` (carreras reales con psql en paralelo). Necesita `initdb`, `pg_ctl` y `psql` (en Mac: `brew install postgresql@16`) |
 | `npm --prefix backend run check:production` | Solo lecturas contra producción; falla a propósito si no hay credenciales reales |
 | Android | Solo en GitHub Actions o en una Mac con Android Studio: `cd android-kiosk && ./gradlew :app:testDebugUnitTest :app:assembleDebug` |
 
@@ -120,7 +120,7 @@ Pruebas clave de cupones: `backend/tests/vouchers.test.ts`, `e2e/cash-vouchers.s
 |---|---|
 | `npm run verify` (lint, tipos, 29 pruebas frontend, 55 backend, builds) | ✅ Pasa |
 | Lint del backend | ✅ 0 errores (2 advertencias) |
-| PostgreSQL 001–008, flujos críticos y concurrencia | ✅ Pasa |
+| PostgreSQL 001–009, pg-safeupdate, flujos críticos y concurrencia | ✅ Pasa |
 | Playwright | ✅ 75 de 75 |
 | `npm audit --omit=dev` frontend y backend | ✅ 0 vulnerabilidades |
 | CI de GitHub en PR #2 (verify ×2 y build Android) | ✅ Pasa (la instrumentada en emulador se omite) |
@@ -193,3 +193,17 @@ la fotografía generada de Capuccino (`1781621332807`), descubierta como product
 las doce imágenes anteriores permanecen idénticas. Ver
 [BARISTA_AUDIO_CAPPUCCINO_DELIVERY.md](BARISTA_AUDIO_CAPPUCCINO_DELIVERY.md).
 No se modificaron recetas, precios ni inventario por estas dos mejoras.
+
+
+## Point SELF_SERVICE y encuadre compartido — 5-nov-2026
+
+La terminal configurada se cambió mediante un único PATCH de PDV a SELF_SERVICE,
+con respuesta 200 y consulta posterior confirmatoria, sin alterar su vinculación.
+No hubo cobros de prueba. Reinicio físico y validación de cobro real pendientes de
+confirmación del responsable. Inspección y regreso controlado a PDV:
+[POINT_SELF_SERVICE.md](POINT_SELF_SERVICE.md). La utilidad no se ejecuta en CI,
+no expone un endpoint web y no cambia modos al arrancar/desplegar el servidor.
+
+El modal compartido de POS/QR ahora limita el tamaño de la foto; antes solo había
+reglas dentro del kiosco. Tres recorridos de regresión verifican imagen completa,
+ausencia de desbordamiento horizontal y botón visible en POS y QR móvil/escritorio.
