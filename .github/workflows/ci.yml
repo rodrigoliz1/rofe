@@ -46,7 +46,7 @@ jobs:
           git -C "$RUNNER_TEMP/pg-safeupdate" remote add origin https://github.com/eradman/pg-safeupdate.git
           git -C "$RUNNER_TEMP/pg-safeupdate" fetch --depth 1 origin 37dbc9c4acf5e2504adf2b218e9c6b41751022f3
           git -C "$RUNNER_TEMP/pg-safeupdate" checkout --detach FETCH_HEAD
-          make -C "$RUNNER_TEMP/pg-safeupdate" PG_CONFIG=/usr/lib/postgresql/16/bin/pg_config
+          make -C "$RUNNER_TEMP/pg-safeupdate" PG_CONFIG=/usr/lib/postgresql/16/bin/pg_config with_llvm=no
           echo "SAFEUPDATE_LIBRARY=$RUNNER_TEMP/pg-safeupdate/safeupdate.so" >> "$GITHUB_ENV"
       - name: PostgreSQL transactional checks
         run: PATH="/usr/lib/postgresql/16/bin:$PATH" npm --prefix backend run test:db
