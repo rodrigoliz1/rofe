@@ -193,5 +193,7 @@ firmado sigue siendo un artefacto para revisión, **no una autorización de prod
 
 Pasos de autorización, matriz N950 y preguntas para Mercado Pago:
 [ROFE_POINT_HOMOLOGATION.md](ROFE_POINT_HOMOLOGATION.md).
+Estado por requisito y punto de reanudación tras respuesta de SmartApps:
+[ROFE_POINT_HOMOLOGATION_CHECKLIST.md](ROFE_POINT_HOMOLOGATION_CHECKLIST.md).
 Investigación del plugin oficial y alcance de sus consultas:
 [ROFE_POINT_PLUGIN_RESEARCH.md](ROFE_POINT_PLUGIN_RESEARCH.md).

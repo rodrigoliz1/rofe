@@ -1,5 +1,9 @@
 # ROFÉ Point — compatibilidad y homologación
 
+Seguimiento por requisitos cumplidos, trabajo sin terminal, dependencias de MP,
+pruebas de sandbox y expediente de revisión:
+[ROFE_POINT_HOMOLOGATION_CHECKLIST.md](ROFE_POINT_HOMOLOGATION_CHECKLIST.md).
+
 Consulta técnica: 5 de noviembre de 2026. Las capacidades «pendientes» no se presentan
 como probadas por un test con dobles, una compilación o un render local.
 
