@@ -11,7 +11,7 @@ declare
   report jsonb := '{"id":"93000000-0000-4000-8000-000000000001","closed_at":"2026-11-05T09:00:00Z","period_start":"2026-11-05T08:00:00Z","period_end":"2026-11-05T09:00:00Z","total_sales":0,"total_income":50,"total_costs":0,"net_profit":0,"cash_start":200,"cash_end":250,"cash_sales":0,"card_sales":0,"refunds":0,"discounts":0,"cost_of_goods":0,"expenses":0,"gross_margin":0,"operating_result":0,"expected_cash":250,"counted_cash":250,"difference":0,"tickets":0,"closed_by":"cash-regression"}';
   drawer_before jsonb;
 begin
-  if rofe_schema_version() <> 9 then raise exception 'cash migration missing'; end if;
+  if rofe_schema_version() < 9 then raise exception 'cash migration missing'; end if;
   if not open_cash_session(session) then raise exception 'opening failed'; end if;
   if open_cash_session(session) then raise exception 'opening replay duplicated'; end if;
   if open_cash_session(jsonb_set(session,'{id}','"91000000-0000-4000-8000-000000000002"')) then raise exception 'second simultaneous session allowed'; end if;

@@ -21,7 +21,7 @@ async function freshDrawer(request: APIRequestContext, admin: Headers, denominat
   const current = (await (await request.get(`${API}/api/admin/cash/session`, { headers: admin })).json()) as { current?: unknown };
   if (current.current) {
     const drawer = await (await request.get(`${API}/api/cash/denominations`, { headers: admin })).json() as Record<string, number>;
-    expect((await request.post(`${API}/api/admin/cash/session/close`, { headers: admin, data: { denominations: drawer } })).status()).toBe(200);
+    expect((await request.post(`${API}/api/admin/cash/session/close`, { headers: admin, data: { sessionId: (await (await request.get('http://127.0.0.1:3100/api/admin/cash/session', { headers: admin })).json()).current.id, denominations: drawer } })).status()).toBe(200);
   }
   expect((await request.post(`${API}/api/admin/cash/session/open`, { headers: admin, data: { denominations } })).status()).toBe(201);
 }
@@ -34,7 +34,7 @@ async function finish(request: APIRequestContext, admin: Headers, ids: string[])
 }
 async function closeDrawer(request: APIRequestContext, admin: Headers) {
   const drawer = await (await request.get(`${API}/api/cash/denominations`, { headers: admin })).json() as Record<string, number>;
-  return request.post(`${API}/api/admin/cash/session/close`, { headers: admin, data: { denominations: drawer } });
+  return request.post(`${API}/api/admin/cash/session/close`, { headers: admin, data: { sessionId: (await (await request.get('http://127.0.0.1:3100/api/admin/cash/session', { headers: admin })).json()).current.id, denominations: drawer } });
 }
 
 test('reconciliation, necessity, concurrency, refunds and payouts keep every peso accounted for', async ({ request }) => {

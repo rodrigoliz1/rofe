@@ -38,6 +38,8 @@ const envSchema = z.object({
   // Serverless SSE: close streams before the function limit and poll the database for changes.
   SSE_MAX_DURATION_MS: z.coerce.number().int().min(0).max(3_600_000).default(0),
   REALTIME_POLL_MS: z.coerce.number().int().min(0).max(60_000).default(0),
+  POINT_RECONCILIATION_ENABLED: booleanFromString,
+  CRON_SECRET: z.string().min(32).optional(),
 });
 
 export type AppEnv = z.infer<typeof envSchema>;
@@ -47,6 +49,12 @@ let cachedEnv: AppEnv | undefined;
 export function getEnv(): AppEnv {
   if (cachedEnv) return cachedEnv;
 
+  // A shared encrypted variable is still a production credential in a preview.
+  // No opt-in flag can turn a Vercel preview into the production backend.
+  if (process.env.VERCEL && process.env.VERCEL_ENV !== 'production') {
+    throw new Error('PREVIEW_BACKEND_DISABLED: el backend remoto solo se habilita en despliegues productivos.');
+  }
+
   const parsed = envSchema.safeParse(withVercelDefaults(Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== ''))));
   if (!parsed.success) {
     const details = parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ');
@@ -54,6 +62,9 @@ export function getEnv(): AppEnv {
   }
 
   const env = parsed.data;
+  if (env.NODE_ENV === 'development' && [env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, env.MERCADO_PAGO_ACCESS_TOKEN, env.MERCADO_PAGO_WEBHOOK_SECRET, env.POINT_DEVICE_ID, env.STRIPE_SECRET_KEY, env.STRIPE_WEBHOOK_SECRET].some(Boolean)) {
+    throw new Error('DEVELOPMENT_REMOTE_DISABLED: usa npm run dev con JSON aislado y servicios financieros deshabilitados.');
+  }
   if (env.PUBLIC_ORDERING_URL) {
     const url = new URL(env.PUBLIC_ORDERING_URL);
     if (url.username || url.password || url.search || url.hash || url.pathname !== '/' || (env.NODE_ENV === 'production' && url.protocol !== 'https:') || !['http:', 'https:'].includes(url.protocol)) {

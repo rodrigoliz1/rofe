@@ -1,3 +1,5 @@
+import { AppError } from './utils/errors';
+import type { PointJob, PointOutcome } from './payments/pointReconciliation';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import type { CashPaymentInput, DbChangeVoucher, DbChangeVoucherRedemption, DbPickupSettings } from './db';
 import type { DbAdapter, DbInventoryItem, DbCashTransaction, DbBakeryBatch, DbOrder, DbInventoryConsumption, DbSupplier, DbPurchase, DbWasteRecord, DbInventoryMovement, DbCashSession, DbDailyClosure, DbProductionBatch } from './db';
@@ -549,6 +551,45 @@ export class SupabaseDbAdapter implements DbAdapter {
     return data.map((row) => ({ id: row.id, ingredientId: row.ingredient_id, quantity: Number(row.quantity), movementType: row.movement_type, reason: row.reason || undefined, userId: row.user_id || undefined, deviceId: row.device_id || undefined, orderId: row.order_id || undefined, purchaseId: row.purchase_id || undefined, operationId: row.operation_id || undefined, unitCostSnapshot: Number(row.unit_cost_snapshot), createdAt: row.created_at }));
   }
 
+  async pointReconciliationAvailable(): Promise<boolean> { return this.schemaVersion >= 11; }
+
+  async listUnassignedPoint(): Promise<DbOrder[]> {
+    if (this.schemaVersion < 10) return [];
+    const { data, error } = await this.supabase.from('orders').select('*').eq('payment_method','card').or('payment_provider.is.null,payment_provider.neq.STRIPE').neq('channel','QR_PICKUP').in('payment_status',['APPROVED','REFUNDED']).not('paid_at','is',null).is('paid_cash_session_id',null).order('paid_at',{ascending:false}).limit(100);
+    if (error) throw error;
+    return data.map(mapOrder);
+  }
+
+  async listPendingPoint(): Promise<Array<{ order: DbOrder; job?: PointJob }>> {
+    const { data, error } = await this.supabase.from('orders').select('*').eq('payment_method', 'card').eq('status', 'PENDING_PAYMENT').eq('payment_status', 'PENDING').or('payment_provider.is.null,payment_provider.neq.STRIPE').neq('channel', 'QR_PICKUP').order('created_at').limit(100);
+    if (error) throw error;
+    const orders = data.map(mapOrder).filter(o => o.paymentProvider !== 'STRIPE' && o.channel !== 'QR_PICKUP');
+    if (!await this.pointReconciliationAvailable() || !orders.length) return orders.map(order => ({ order }));
+    const jobs = await this.supabase.from('point_reconciliation_jobs').select('*').in('order_id', orders.map(o => o.id));
+    if (jobs.error) throw jobs.error;
+    return orders.map(order => ({ order, job: jobs.data.map(mapPointJob).find(j => j.orderId === order.id) }));
+  }
+
+  async claimPointReconciliation(limit: number): Promise<PointJob[]> {
+    if (!await this.pointReconciliationAvailable()) throw new AppError(503, 'POINT_MIGRATION_REQUIRED', 'La conciliación necesita la migración 011.');
+    const { data, error } = await this.supabase.rpc('claim_point_reconciliation', { p_limit: limit });
+    if (error) throw error;
+    return (data as Record<string, unknown>[]).map(mapPointJob);
+  }
+
+  async finishPointReconciliation(orderId: string, leaseToken: string, outcome: PointOutcome, delaySeconds: number): Promise<boolean> {
+    const { data, error } = await this.supabase.rpc('finish_point_reconciliation', { p_order_id: orderId, p_lease_token: leaseToken, p_outcome: outcome, p_delay_seconds: delaySeconds });
+    if (error) throw error;
+    return Boolean(data);
+  }
+
+  async closeCashSessionConsistently(sessionId: string, denominations: Record<string, number>, userId: string, notes?: string): Promise<DbCashSession> {
+    if (this.schemaVersion < 10) throw new AppError(503, 'CASH_MIGRATION_REQUIRED', 'El cierre seguro necesita la migración 010. No repitas el corte hasta actualizar el sistema.');
+    const { data, error } = await this.supabase.rpc('close_cash_session_consistent', { p_session_id: sessionId, p_denominations: denominations, p_user_id: userId, p_notes: notes ?? null });
+    if (error) throw Object.assign(error, { databaseFunction: 'close_cash_session_consistent' });
+    return mapCashSession(data);
+  }
+
   async getCashSessions(): Promise<DbCashSession[]> {
     const data = await this.readAll('cash_sessions');
     return data.map(mapCashSession);
@@ -639,9 +680,18 @@ function mapOrder(row: Record<string, any>): DbOrder { return {
       paymentMethod: row.payment_method,
       paymentId: row.payment_id || undefined,
       paymentIntentId: row.payment_intent_id || undefined,
+      paidAt: row.paid_at || undefined,
+      paidCashSessionId: row.paid_cash_session_id || undefined,
+      refundedAt: row.refunded_at || undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at || row.created_at,
       notes: row.notes || undefined,
       cancellationReason: row.cancellation_reason || undefined,
       inventoryAppliedAt: row.inventory_applied_at || undefined,
     }; }
+
+function mapPointJob(row: Record<string, unknown>): PointJob {
+  return { orderId: String(row.order_id), attempts: Number(row.attempts), outcome: row.outcome as PointOutcome,
+    lastAttemptAt: row.last_attempt_at ? String(row.last_attempt_at) : undefined, nextAttemptAt: String(row.next_attempt_at),
+    leaseToken: row.lease_token ? String(row.lease_token) : undefined, leaseUntil: row.lease_until ? String(row.lease_until) : undefined };
+}

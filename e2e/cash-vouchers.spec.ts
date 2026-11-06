@@ -34,7 +34,7 @@ async function cleanUp(request: APIRequestContext, orderIds: string[]) {
   const current = (await (await request.get(`${API}/api/admin/cash/session`, { headers: admin })).json()) as { current?: { id: string } };
   if (current.current) {
     const drawer = await (await request.get(`${API}/api/cash/denominations`, { headers: admin })).json() as Record<string, number>;
-    await request.post(`${API}/api/admin/cash/session/close`, { headers: admin, data: { denominations: drawer } });
+    await request.post(`${API}/api/admin/cash/session/close`, { headers: admin, data: { sessionId: (await (await request.get('http://127.0.0.1:3100/api/admin/cash/session', { headers: admin })).json()).current.id, denominations: drawer } });
   }
 }
 
@@ -53,7 +53,7 @@ test('insufficient change issues a voucher that can be used, released and paid o
   const current = (await (await request.get(`${API}/api/admin/cash/session`, { headers: admin })).json()) as { current?: { id: string } };
   if (current.current) {
     const drawer = await (await request.get(`${API}/api/cash/denominations`, { headers: admin })).json() as Record<string, number>;
-    expect((await request.post(`${API}/api/admin/cash/session/close`, { headers: admin, data: { denominations: drawer } })).status()).toBe(200);
+    expect((await request.post(`${API}/api/admin/cash/session/close`, { headers: admin, data: { sessionId: (await (await request.get('http://127.0.0.1:3100/api/admin/cash/session', { headers: admin })).json()).current.id, denominations: drawer } })).status()).toBe(200);
   }
   expect((await request.post(`${API}/api/admin/cash/session/open`, { headers: admin, data: { denominations: { bill_20: 1, coin_10: 1 } } })).status()).toBe(201);
   const device = await deviceHeaders(request, 'Caja cupones E2E');
@@ -140,7 +140,7 @@ test('insufficient change issues a voucher that can be used, released and paid o
 
   // Cash closing: 30 opening + 100 received − 30 change + 38 sale − 25 voucher payout = 113.
   const drawer = await (await request.get(`${API}/api/cash/denominations`, { headers: admin })).json() as Record<string, number>;
-  const closed = await request.post(`${API}/api/admin/cash/session/close`, { headers: admin, data: { denominations: drawer } });
+  const closed = await request.post(`${API}/api/admin/cash/session/close`, { headers: admin, data: { sessionId: (await (await request.get('http://127.0.0.1:3100/api/admin/cash/session', { headers: admin })).json()).current.id, denominations: drawer } });
   expect(closed.status()).toBe(200);
   expect(await closed.json()).toMatchObject({ expectedCash: 113, countedCash: 113, difference: 0 });
   await cleanUp(request, [order.id, espresso.id]);
@@ -170,7 +170,7 @@ test('a voucher in checkout lowers the total, and one that covers everything con
   const current = (await (await request.get(`${API}/api/admin/cash/session`, { headers: admin })).json()) as { current?: { id: string } };
   if (current.current) {
     const drawer = await (await request.get(`${API}/api/cash/denominations`, { headers: admin })).json() as Record<string, number>;
-    await request.post(`${API}/api/admin/cash/session/close`, { headers: admin, data: { denominations: drawer } });
+    await request.post(`${API}/api/admin/cash/session/close`, { headers: admin, data: { sessionId: (await (await request.get('http://127.0.0.1:3100/api/admin/cash/session', { headers: admin })).json()).current.id, denominations: drawer } });
   }
   await request.post(`${API}/api/admin/cash/session/open`, { headers: admin, data: { denominations: {} } });
   const device = await deviceHeaders(request, 'Caja checkout cupón E2E');
