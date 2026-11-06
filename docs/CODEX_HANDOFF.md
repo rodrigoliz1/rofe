@@ -184,3 +184,12 @@ dueño y confirmada por RPC de solo lectura: versión 9, 5-nov-2026 21:18 UTC**.
 solución. La regresión PostgreSQL ahora cubre el guard real, reversión ante fallo
 del informe y carreras de apertura/cierre. La base productiva no tenía sesiones ni movimientos de sesión; los seis conjuntos
 financieros se compararon antes/después y permanecen idénticos. Conserva registros legacy.
+
+
+## Actualización de audio y catálogo — 5-nov-2026
+
+El MP3 suministrado por el dueño reemplaza el tono de pedidos en Barista. Se añadió
+la fotografía generada de Capuccino (`1781621332807`), descubierta como producto 13;
+las doce imágenes anteriores permanecen idénticas. Ver
+[BARISTA_AUDIO_CAPPUCCINO_DELIVERY.md](BARISTA_AUDIO_CAPPUCCINO_DELIVERY.md).
+No se modificaron recetas, precios ni inventario por estas dos mejoras.

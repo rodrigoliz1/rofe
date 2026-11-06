@@ -1,25 +1,44 @@
 import type { Order } from '../types';
+import alertSoundUrl from '../assets/audio/nuevo_pedido.mp3';
+
 let audio: AudioContext | undefined;
+let alertBuffer: AudioBuffer | undefined;
+let loadingSound: Promise<void> | undefined;
+
+function loadSound(context: AudioContext): Promise<void> {
+  if (alertBuffer) return Promise.resolve();
+  loadingSound ??= (async () => {
+    const response = await fetch(alertSoundUrl, { signal: AbortSignal.timeout(10_000) });
+    if (!response.ok) throw new Error('No se pudo cargar el sonido de pedidos.');
+    alertBuffer = await context.decodeAudioData(await response.arrayBuffer());
+  })().catch(cause => { loadingSound = undefined; throw cause; });
+  return loadingSound;
+}
+
 export async function enableBaristaAudio(): Promise<boolean> {
   try {
     const Constructor = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!Constructor) return false;
     audio ??= new Constructor();
-    if (audio.state !== 'running') await audio.resume();
-    return audio.state === 'running';
+    // Resume immediately in the user gesture, before waiting for the MP3 download.
+    const resume = audio.state === 'running' ? Promise.resolve() : audio.resume();
+    await Promise.all([resume, loadSound(audio)]);
+    return audio.state === 'running' && Boolean(alertBuffer);
   } catch { return false; }
 }
+
 export function playBaristaAlert(): boolean {
-  if (!audio || audio.state !== 'running') return false;
+  if (!audio || audio.state !== 'running' || !alertBuffer) return false;
   try {
-    const now = audio.currentTime; const oscillator = audio.createOscillator(); const gain = audio.createGain();
-    oscillator.type = 'triangle'; oscillator.frequency.setValueAtTime(587.33, now); oscillator.frequency.exponentialRampToValueAtTime(880, now + 0.15);
-    gain.gain.setValueAtTime(0.12, now); gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
-    oscillator.connect(gain); gain.connect(audio.destination); oscillator.start(now); oscillator.stop(now + 0.4);
-    oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
+    const source = audio.createBufferSource();
+    source.buffer = alertBuffer;
+    source.connect(audio.destination);
+    source.onended = () => source.disconnect();
+    source.start();
     return true;
   } catch { return false; }
 }
+
 export function isAlertable(order: Pick<Order, 'status' | 'paymentMethod'>): boolean {
   return order.status === 'PAID' || (order.status === 'PENDING_PAYMENT' && order.paymentMethod === 'cash');
 }

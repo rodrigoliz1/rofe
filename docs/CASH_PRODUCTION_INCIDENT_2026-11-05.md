@@ -83,3 +83,17 @@ Validación local del parche: lint, typecheck de ambos proyectos, 33 pruebas fro
 69 backend, 78 E2E, compilaciones frontend/backend y PostgreSQL con pg-safeupdate
 real y concurrencia. Dependencias de producción: cero vulnerabilidades en ambos
 proyectos. La operación financiera física de producción no se ejecutó como prueba.
+
+
+## Observación de operación posterior (solo lectura)
+
+En la revisión de las 19:18 CDMX se encontró una apertura registrada por la
+operación del local a las **15:35:04 CDMX del 5-nov-2026**, después de 009. Hay
+una sola sesión abierta, 18 movimientos vinculados a ella y ninguna operación
+UUID duplicada. El saldo calculado por el libro coincide con las denominaciones;
+no hay denominaciones negativas y las 26 transacciones y cuatro cortes legacy
+originales permanecen idénticos. El cierre de esa sesión aún no se había realizado.
+
+Estas operaciones **no fueron pruebas automatizadas del agente**. Se observaron
+sin cambios mediante la API de lectura. Evidencia privada:
+`.rofe-local/evidence/cash-close-production/live-session-readonly-audit.json`.

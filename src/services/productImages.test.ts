@@ -10,14 +10,14 @@ const seed = [
 
 const productionRows = [
   // Rows seeded in production by an older app version (src/App.tsx defaults).
-  ['espresso', '/espresso.png'], ['double-espresso', '/espresso.png'], ['latte', 'https://images.unsplash.com/photo-1541167760496-1628856ab772?w=600'],
+  ['1781621332807', 'https://images.unsplash.com/old-cappuccino'], ['espresso', '/espresso.png'], ['double-espresso', '/espresso.png'], ['latte', 'https://images.unsplash.com/photo-1541167760496-1628856ab772?w=600'],
   ['flat-white', 'https://images.unsplash.com/photo-1577968897966-3d4325b36b61?w=600'], ['iced-matcha-latte', '/matcha-frio.jpg'],
   ['croissant-mantequilla', 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?w=600'], ['pain-au-chocolat', '/pan-chocolate.jpg'],
 ] as const;
 
 describe('catalog photos', () => {
-  it('covers the 12 products of the production catalog with an explicit status', () => {
-    expect(Object.keys(manifest.products).sort()).toEqual(['americano', 'cold-brew', 'croissant-mantequilla', 'double-espresso', 'espresso', 'flat-white', 'galleta-chocolate', 'iced-latte', 'iced-matcha-latte', 'latte', 'matcha-latte', 'pain-au-chocolat']);
+  it('covers the 13 products of the production catalog with an explicit status', () => {
+    expect(Object.keys(manifest.products).sort()).toEqual(['1781621332807', 'americano', 'cold-brew', 'croissant-mantequilla', 'double-espresso', 'espresso', 'flat-white', 'galleta-chocolate', 'iced-latte', 'iced-matcha-latte', 'latte', 'matcha-latte', 'pain-au-chocolat']);
     for (const id of Object.keys(manifest.products)) expect(photoStatus(id)).toBe('approved');
   });
 
